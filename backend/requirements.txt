@@ -1,0 +1,16 @@
+# Control de Accesos — Banco Santander / SAIMA SEGURIDAD
+# Python 3.9+
+
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic-settings>=2.0.0
+
+# Base de datos
+# (SQLite viene en la stdlib; opcional driver si se usa aiosqlite)
+
+# Hardware Modbus (reutilizado del PoC)
+pymodbus>=3.5.0
+
+# Seguridad / usuarios (fase posterior)
+# passlib[bcrypt]>=1.7.4
+# python-multipart>=0.0.6
