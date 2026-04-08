@@ -12,6 +12,7 @@ const C = {
 };
 
 const API = "/api/panel";
+const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
 const TABS = ["Panel", "Módulos I/O", "Histórico", "Configuración"];
 const MODULES_META = [
   { id: 1, name: "Módulo 1", sub: "Central", inputs: Array.from({ length: 12 }, (_, i) => `IN${i + 1}`), outputs: Array.from({ length: 12 }, (_, i) => `OUT${i + 1}`) },
@@ -96,18 +97,42 @@ export default function ETD8A12Panel() {
   useEffect(() => {
     const loadRules = async () => {
       try {
+        const localDraft = localStorage.getItem(RULES_JSON_STORAGE_KEY);
+        if (localDraft) {
+          const parsedLocal = JSON.parse(localDraft);
+          if (parsedLocal && typeof parsedLocal === "object") {
+            setRulesMap(parsedLocal);
+            setRulesJson(JSON.stringify(parsedLocal, null, 2));
+            const firstKeyLocal = Object.keys(parsedLocal)[0] || null;
+            setSelectedMode((prev) => prev || firstKeyLocal);
+          }
+        }
+
         const data = await apiFetch("/rules");
         const loadedRules = data.rules || {};
-        setRulesMap(loadedRules);
-        setRulesJson(JSON.stringify(loadedRules, null, 2));
-        const firstKey = Object.keys(loadedRules)[0] || null;
-        setSelectedMode((prev) => prev || firstKey);
+        // Si hay borrador local, lo respetamos; si no, usamos backend.
+        if (!localDraft) {
+          setRulesMap(loadedRules);
+          setRulesJson(JSON.stringify(loadedRules, null, 2));
+          const firstKey = Object.keys(loadedRules)[0] || null;
+          setSelectedMode((prev) => prev || firstKey);
+        }
       } catch (e) {
         addUI("ERR", `No se pudieron cargar reglas: ${e.message}`);
       }
     };
     loadRules();
   }, [addUI]);
+
+  useEffect(() => {
+    try {
+      if (rulesJson) {
+        localStorage.setItem(RULES_JSON_STORAGE_KEY, rulesJson);
+      }
+    } catch {
+      // ignore localStorage failures
+    }
+  }, [rulesJson]);
 
   useEffect(() => {
     if (!serverOnline) return;

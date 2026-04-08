@@ -1,7 +1,9 @@
 """API compatible con panel ETD8A12 (software prueba_)."""
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -52,7 +54,7 @@ mode_latches: Dict[str, bool] = {
     "IN_01_07": False,  # Horario Manual
 }
 current_mode: Optional[str] = None
-rules_config: Dict[str, dict] = {
+DEFAULT_RULES_CONFIG: Dict[str, dict] = {
     "horario_automatico": {
         "enabled": True,
         "auto_execute": True,
@@ -64,6 +66,28 @@ rules_config: Dict[str, dict] = {
         "deactivate_outputs": [],
     }
 }
+BACKEND_DIR = Path(__file__).resolve().parents[3]
+RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
+
+
+def _load_rules_from_disk() -> Dict[str, dict]:
+    try:
+        if RULES_FILE.exists():
+            raw = json.loads(RULES_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and raw:
+                return raw
+    except Exception:  # noqa: BLE001
+        # Si falla lectura, se usan reglas por defecto.
+        pass
+    return DEFAULT_RULES_CONFIG.copy()
+
+
+def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
+    RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RULES_FILE.write_text(json.dumps(rules, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+rules_config: Dict[str, dict] = _load_rules_from_disk()
 rules_runtime: Dict[str, dict] = {"horario_automatico": {"last_trigger_active": False, "last_executed_at": None}}
 
 
@@ -646,6 +670,7 @@ def get_rules():
 def update_rules(body: RulesUpdateBody):
     global rules_config
     rules_config = body.rules
+    _save_rules_to_disk(rules_config)
     add_event("INFO", "Reglas actualizadas por JSON", 1)
     return {"ok": True, "rules": rules_config}
 
