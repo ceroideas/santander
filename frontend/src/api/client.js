@@ -33,4 +33,5 @@ export const api = {
   getHolidays: () => request('/api/config/holidays'),
   getTimings: () => request('/api/config/timings'),
   getBoards: () => request('/api/config/boards'),
+  testBoardsConnection: (timeout = 2) => request(`/api/config/boards/test-connection?timeout=${timeout}`),
 }

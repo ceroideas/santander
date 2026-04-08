@@ -1,5 +1,6 @@
 """GET/PUT /api/config/* — horarios, festivos, tiempos, boards (IPs ETD8A12)."""
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
+from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
 
 router = APIRouter(prefix="/config")
 
@@ -46,11 +47,11 @@ def put_timings():
 @router.get("/boards", summary="Configuración módulos ETD8A12")
 def get_boards():
     """IP, puerto, slave_id de los 3 módulos. (TODO: tabla boards_config.)"""
+    boards_cfg = get_boards_config_placeholder()
     return {
         "boards": [
-            {"board_id": 1, "name": "Central", "host": "192.168.0.10", "port": 5000, "slave_id": 1},
-            {"board_id": 2, "name": "Puerta Calle", "host": "192.168.0.11", "port": 5000, "slave_id": 1},
-            {"board_id": 3, "name": "Puerta Oficina", "host": "192.168.0.12", "port": 5000, "slave_id": 1},
+            {"board_id": board_id, **cfg}
+            for board_id, cfg in boards_cfg.items()
         ]
     }
 
@@ -59,3 +60,40 @@ def get_boards():
 def put_boards():
     """(TODO: validar y guardar en boards_config; reconectar Modbus.)"""
     return {"ok": True}
+
+
+@router.get("/boards/test-connection", summary="Diagnóstico de conectividad ETD8A12")
+def test_boards_connection(
+    timeout: float = Query(default=2.0, ge=0.5, le=10.0),
+):
+    """
+    Prueba conectividad TCP a las IPs de ETD8A12.
+    Se prueba el puerto configurado y puertos típicos de diagnóstico.
+    """
+    ports_to_check = [5000, 502, 80, 443, 23]
+    boards_cfg = get_boards_config_placeholder()
+    diagnostics = []
+
+    for board_id, cfg in boards_cfg.items():
+        host = cfg["host"]
+        report = test_board_ports(host=host, ports=ports_to_check, timeout=timeout)
+        diagnostics.append(
+            {
+                "board_id": board_id,
+                "name": cfg["name"],
+                "host": host,
+                "configured_port": cfg["port"],
+                "modbus_configured_reachable": any(
+                    c["port"] == cfg["port"] and c["reachable"] for c in report["checks"]
+                ),
+                "open_ports": report["open_ports"],
+                "checks": report["checks"],
+            }
+        )
+
+    return {
+        "ok": True,
+        "timeout_seconds": timeout,
+        "tested_ports": ports_to_check,
+        "boards": diagnostics,
+    }

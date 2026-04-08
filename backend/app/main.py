@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config
+from app.api.routes import health, status, modes, events, config, panel
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -56,6 +56,7 @@ app.include_router(status.router, prefix=settings.api_prefix, tags=["Estado"])
 app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
+app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
 
 
 # ─── Servir frontend en producción ─────────────────────────────────────────
