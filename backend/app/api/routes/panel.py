@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from app.db.session import get_connection
 from pydantic import BaseModel
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
@@ -89,6 +90,83 @@ def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
 
 rules_config: Dict[str, dict] = _load_rules_from_disk()
 rules_runtime: Dict[str, dict] = {"horario_automatico": {"last_trigger_active": False, "last_executed_at": None}}
+
+PANEL_STATE_OVERRIDES_KEY = "panel_input_overrides"
+PANEL_STATE_CURRENT_MODE_KEY = "panel_current_mode"
+
+
+def _ensure_panel_state_table() -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS panel_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def _save_panel_state_value(key: str, value: str) -> None:
+    _ensure_panel_state_table()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO panel_state (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value, datetime.now().isoformat()),
+        )
+        conn.commit()
+
+
+def _load_panel_state_value(key: str) -> Optional[str]:
+    _ensure_panel_state_table()
+    with get_connection() as conn:
+        row = conn.execute("SELECT value FROM panel_state WHERE key = ?", (key,)).fetchone()
+        return row[0] if row else None
+
+
+def _persist_overrides_to_db() -> None:
+    data = {str(board_id): overrides for board_id, overrides in input_overrides.items()}
+    _save_panel_state_value(PANEL_STATE_OVERRIDES_KEY, json.dumps(data))
+
+
+def _persist_current_mode_to_db() -> None:
+    _save_panel_state_value(PANEL_STATE_CURRENT_MODE_KEY, json.dumps({"current_mode": current_mode}))
+
+
+def _load_persisted_panel_state() -> None:
+    global current_mode
+    raw_overrides = _load_panel_state_value(PANEL_STATE_OVERRIDES_KEY)
+    if raw_overrides:
+        try:
+            data = json.loads(raw_overrides)
+            if isinstance(data, dict):
+                for board_key, values in data.items():
+                    board_id = int(board_key)
+                    if board_id in input_overrides and isinstance(values, list) and len(values) == 12:
+                        input_overrides[board_id] = [v if v in (None, True, False) else None for v in values]
+        except Exception:  # noqa: BLE001
+            pass
+
+    raw_mode = _load_panel_state_value(PANEL_STATE_CURRENT_MODE_KEY)
+    if raw_mode:
+        try:
+            mode_obj = json.loads(raw_mode)
+            mode_value = mode_obj.get("current_mode")
+            if isinstance(mode_value, str) or mode_value is None:
+                current_mode = mode_value
+        except Exception:  # noqa: BLE001
+            pass
+
+
+_load_persisted_panel_state()
 
 
 def add_event(level: str, message: str, board_id: int = 0) -> None:
@@ -321,7 +399,9 @@ def _evaluate_horario_automatico(
         mode_latches[code] = False
         board_id, channel = _parse_in_code(code)
         input_overrides[board_id][channel - 1] = False
-    current_mode = "HORARIO_AUTOMATICO"
+    current_mode = key
+    _persist_overrides_to_db()
+    _persist_current_mode_to_db()
 
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
@@ -412,7 +492,9 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         else:
             io_state[b]["outputs"][ch - 1] = False
 
-    current_mode = rule_key.upper()
+    current_mode = rule_key
+    _persist_overrides_to_db()
+    _persist_current_mode_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
     add_event("OK", f"Regla forzada ejecutada: {rule_key}", 1)
@@ -474,6 +556,7 @@ def get_status():
             }
             for bid in range(1, 4)
         },
+        "current_mode": current_mode,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -616,6 +699,12 @@ def get_events(limit: int = 300, type_filter: Optional[str] = None):
     return {"total": len(filtered), "events": list(reversed(filtered[-limit:]))}
 
 
+@router.delete("/events")
+def clear_events():
+    event_log.clear()
+    return {"ok": True, "message": "Histórico limpiado"}
+
+
 @router.get("/inputs/override")
 def get_input_overrides():
     return {
@@ -634,6 +723,7 @@ def set_input_override(action: InputOverrideAction):
         raise HTTPException(status_code=400, detail="Canal debe estar entre 1 y 12")
     idx = action.channel - 1
     input_overrides[action.board_id][idx] = action.state
+    _persist_overrides_to_db()
     add_event("INFO", f"Override IN{action.channel:02d} = {action.state}", action.board_id)
     return {"board_id": action.board_id, "channel": action.channel, "override": action.state}
 
@@ -646,6 +736,7 @@ def clear_input_override(board_id: int, channel: int):
         raise HTTPException(status_code=400, detail="Canal debe estar entre 1 y 12")
     idx = channel - 1
     input_overrides[board_id][idx] = None
+    _persist_overrides_to_db()
     add_event("INFO", f"Override IN{channel:02d} limpiado", board_id)
     return {"board_id": board_id, "channel": channel, "override": None}
 
@@ -701,6 +792,7 @@ def evaluate_rules_now(force_trigger_override: bool = True):
         trigger_code = rules_config.get("horario_automatico", {}).get("trigger", "IN_01_01")
         board_id, channel = _parse_in_code(trigger_code)
         input_overrides[board_id][channel - 1] = True
+        _persist_overrides_to_db()
         add_event("INFO", f"Evaluate reglas: trigger {trigger_code} forzado por override", board_id)
 
     result = _evaluate_horario_automatico(

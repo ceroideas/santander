@@ -47,7 +47,21 @@ async function apiFetch(path, opts = {}) {
 export default function ETD8A12Panel() {
   const [tab, setTab] = useState(0);
   const [serverOnline, setServer] = useState(false);
-  const [boards, setBoards] = useState(Object.fromEntries([1, 2, 3].map((id) => [id, { connected: false, inputs: Array(12).fill(false), outputs: Array(12).fill(false), input_overrides: Array(12).fill(null), error: null }])));
+  const [boards, setBoards] = useState(
+    Object.fromEntries(
+      [1, 2, 3].map((id) => [
+        id,
+        {
+          connected: false,
+          inputs: Array(12).fill(false),
+          inputs_raw: Array(12).fill(false),
+          outputs: Array(12).fill(false),
+          input_overrides: Array(12).fill(null),
+          error: null,
+        },
+      ])
+    )
+  );
   const [boardConfigs, setConfigs] = useState({ 1: { host: "192.168.1.101", port: 5000, slave_id: 1 }, 2: { host: "192.168.1.102", port: 5000, slave_id: 1 }, 3: { host: "192.168.1.103", port: 5000, slave_id: 1 } });
   const [events, setEvents] = useState([]);
   const [uiLog, setUiLog] = useState([]);
@@ -73,6 +87,7 @@ export default function ETD8A12Panel() {
           next[+id] = {
             connected: b.connected,
             inputs: b.inputs || Array(12).fill(false),
+            inputs_raw: b.inputs_raw || Array(12).fill(false),
             outputs: b.outputs || Array(12).fill(false),
             input_overrides: b.input_overrides || Array(12).fill(null),
             error: b.error,
@@ -82,6 +97,9 @@ export default function ETD8A12Panel() {
           }
         }
         setBoards((p) => ({ ...p, ...next }));
+        if (d.current_mode) {
+          setSelectedMode(d.current_mode);
+        }
       } catch {
         setServer(false);
       } finally {
@@ -157,8 +175,20 @@ export default function ETD8A12Panel() {
     const endpoint = boards[id].connected ? `/boards/${id}/disconnect` : `/boards/${id}/connect`;
     try {
       setPending((p) => ({ ...p, [`c${id}`]: true }));
-      await apiFetch(endpoint, { method: "POST" });
-      addUI(boards[id].connected ? "WARN" : "OK", `Módulo ${id} ${boards[id].connected ? "desconectado" : "conectado"}`);
+      const res = await apiFetch(endpoint, { method: "POST" });
+      const connectedNow = Boolean(res?.state?.connected ?? res?.connected);
+      setBoards((prev) => ({
+        ...prev,
+        [id]: {
+          ...prev[id],
+          ...(res?.state || {}),
+          connected: connectedNow,
+        },
+      }));
+      addUI(
+        connectedNow ? "OK" : "WARN",
+        `Módulo ${id} ${connectedNow ? "conectado" : "no conectado"}`
+      );
     } catch (e) {
       addUI("ERR", `Módulo ${id}: ${e.message}`);
     } finally {
@@ -256,6 +286,15 @@ export default function ETD8A12Panel() {
       addUI("ERR", `Error evaluando reglas: ${e.message}`);
     }
   };
+  const clearHistory = async () => {
+    try {
+      await apiFetch("/events", { method: "DELETE" });
+      setEvents([]);
+      addUI("INFO", "Histórico del panel borrado");
+    } catch (e) {
+      addUI("ERR", `No se pudo borrar histórico: ${e.message}`);
+    }
+  };
 
   const filtered = histFilter === "ALL" ? events : events.filter((e) => e.type === histFilter);
 
@@ -333,6 +372,21 @@ export default function ETD8A12Panel() {
                     <div style={{ fontSize: 11, fontWeight: 700, color: C.amber, marginTop: 10, marginBottom: 6 }}>
                       12 ENTRADAS (IN1..IN12) - REAL / OVERRIDE
                     </div>
+                    <div
+                      style={{
+                        display: "inline-block",
+                        marginBottom: 6,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: C.blue,
+                        background: C.blueLight,
+                        border: `1px solid ${C.blue}44`,
+                        borderRadius: 12,
+                        padding: "2px 8px",
+                      }}
+                    >
+                      Simulación / Override
+                    </div>
                     <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>
                       Click para ciclo: REAL -&gt; FORZADA ON -&gt; FORZADA OFF -&gt; REAL
                     </div>
@@ -372,7 +426,11 @@ export default function ETD8A12Panel() {
                             fontWeight: 600,
                             cursor: b.connected ? "pointer" : "not-allowed",
                           }}
-                          title={b.input_overrides?.[i] === null ? `IN${i + 1} REAL` : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"}`}
+                          title={
+                            b.input_overrides?.[i] === null
+                              ? `IN${i + 1} REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                              : `IN${i + 1} FORZADA ${b.input_overrides?.[i] ? "ON" : "OFF"} | REAL=${b.inputs_raw?.[i] ? "ON" : "OFF"}`
+                          }
                         >
                           {i + 1}
                         </button>
@@ -389,6 +447,9 @@ export default function ETD8A12Panel() {
                       ON: <strong style={{ color: C.green }}>{(b.input_overrides || []).filter((x) => x === true).length}</strong>
                       {" · "}
                       OFF: <strong style={{ color: C.blue }}>{(b.input_overrides || []).filter((x) => x === false).length}</strong>
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 10, color: C.muted }}>
+                      Real (Modbus) activas: <strong>{(b.inputs_raw || []).filter(Boolean).length}/12</strong>
                     </div>
                     <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                       <Btn small onClick={() => doAllOn(m.id)} disabled={!b.connected}>Todas ON</Btn>
@@ -434,8 +495,11 @@ export default function ETD8A12Panel() {
         {tab === 2 && (
           <Card>
             <SecLabel>Histórico de eventos</SecLabel>
-            <div style={{ marginBottom: 10, display: "flex", gap: 6 }}>
+            <div style={{ marginBottom: 10, display: "flex", gap: 6, alignItems: "center" }}>
               {["ALL", "OK", "WARN", "ERR", "INFO"].map((t) => <button key={t} onClick={() => setHistFilter(t)} style={{ border: `1px solid ${C.border}`, borderRadius: 16, padding: "4px 8px", background: histFilter === t ? C.surfaceAlt : C.white }}>{t}</button>)}
+              <div style={{ marginLeft: "auto" }}>
+                <Btn small variant="danger" onClick={clearHistory}>Borrar histórico</Btn>
+              </div>
             </div>
             <div style={{ maxHeight: 520, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
