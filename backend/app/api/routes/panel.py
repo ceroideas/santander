@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from app.db import panel_modules_store as pms
 from app.db.session import get_connection
 from pydantic import BaseModel
 from pymodbus.client import ModbusTcpClient
@@ -26,34 +27,70 @@ REG_IN_OUT_RELATION = 0x00FA
 MODBUS_TIMEOUT = 8
 DISABLE_IN_OUT_RELATION_ON_CONNECT = False
 
-BOARDS_CONFIG: Dict[int, dict] = {
-    1: {"name": "Placa 1 — Central", "host": "192.168.1.101", "port": 5000, "slave_id": 1},
-    2: {"name": "Placa 2 — Puerta Calle", "host": "192.168.1.102", "port": 5000, "slave_id": 1},
-    3: {"name": "Placa 3 — Puerta Oficina", "host": "192.168.1.103", "port": 5000, "slave_id": 1},
-}
-clients: Dict[int, Optional[ModbusTcpClient]] = {1: None, 2: None, 3: None}
-io_state: Dict[int, dict] = {
-    i: {
-        "connected": False,
-        "inputs_raw": [False] * 12,
-        "outputs": [False] * 12,
-        "inputs": [False] * 12,
-        "last_update": None,
-        "error": None,
-    }
-    for i in range(1, 4)
-}
-input_overrides: Dict[int, List[Optional[bool]]] = {1: [None] * 12, 2: [None] * 12, 3: [None] * 12}
+pms.ensure_panel_modules_schema()
+pms.seed_default_modules_if_empty()
+
+clients: Dict[int, Optional[ModbusTcpClient]] = {}
+io_state: Dict[int, dict] = {}
+input_overrides: Dict[int, List[Optional[bool]]] = {}
+
+
+def _module_ids() -> List[int]:
+    return pms.list_module_ids_ordered()
+
+
+def _board_cfg(board_id: int) -> dict:
+    cfg = pms.get_boards_config_map().get(board_id)
+    if not cfg:
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no existe")
+    return cfg
+
+
+def _board_exists(board_id: int) -> bool:
+    return board_id in pms.get_boards_config_map()
+
+
+def _sync_runtime_from_db() -> None:
+    """Alinea clientes en memoria, tamaños de I/O y overrides con la configuración en SQLite."""
+    global clients, io_state, input_overrides
+    mids = _module_ids()
+    for old in list(clients.keys()):
+        if old not in mids:
+            c = clients.pop(old, None)
+            if c:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+    for old in list(io_state.keys()):
+        if old not in mids:
+            io_state.pop(old, None)
+    for old in list(input_overrides.keys()):
+        if old not in mids:
+            input_overrides.pop(old, None)
+    for mid in mids:
+        if mid not in clients:
+            clients[mid] = None
+        ins, outs = pms.get_channels_for_module(mid)
+        n_in, n_out = len(ins), len(outs)
+        prev = io_state.get(mid, {})
+        prev_in_raw: List[bool] = list(prev.get("inputs_raw") or [])
+        prev_out: List[bool] = list(prev.get("outputs") or [])
+        prev_eff: List[bool] = list(prev.get("inputs") or [])
+        io_state[mid] = {
+            "connected": prev.get("connected", False),
+            "inputs_raw": [prev_in_raw[i] if i < len(prev_in_raw) else False for i in range(n_in)],
+            "outputs": [prev_out[i] if i < len(prev_out) else False for i in range(n_out)],
+            "inputs": [prev_eff[i] if i < len(prev_eff) else False for i in range(n_in)],
+            "last_update": prev.get("last_update"),
+            "error": prev.get("error"),
+        }
+        o_prev = input_overrides.get(mid, [])
+        input_overrides[mid] = [
+            (o_prev[i] if i < len(o_prev) and o_prev[i] in (None, True, False) else None) for i in range(n_in)
+        ]
 event_log: List[dict] = []
-mode_latches: Dict[str, bool] = {
-    "IN_01_01": False,  # Horario Automatico
-    "IN_01_02": False,  # Horario Esclusa
-    "IN_01_03": False,  # Horario Extendido
-    "IN_01_04": False,  # Horario Autoservicio
-    "IN_01_05": False,  # Horario Cerrado
-    "IN_01_06": False,  # Horario Carga Cajero
-    "IN_01_07": False,  # Horario Manual
-}
+mode_latches: Dict[str, bool] = {}
 current_mode: Optional[str] = None
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {
     "horario_automatico": {
@@ -89,7 +126,35 @@ def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
 
 
 rules_config: Dict[str, dict] = _load_rules_from_disk()
-rules_runtime: Dict[str, dict] = {"horario_automatico": {"last_trigger_active": False, "last_executed_at": None}}
+rules_runtime: Dict[str, dict] = {}
+
+
+def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
+    """Asegura entradas en mode_latches para cada código IN referenciado en las reglas."""
+    for _rk, rule in rules.items():
+        tc = rule.get("trigger")
+        if isinstance(tc, str) and tc.startswith("IN_"):
+            mode_latches.setdefault(tc, False)
+        for code in rule.get("blocked_if_active") or []:
+            if isinstance(code, str) and code.startswith("IN_"):
+                mode_latches.setdefault(code, False)
+        for code in rule.get("deactivate_modes") or []:
+            if isinstance(code, str) and code.startswith("IN_"):
+                mode_latches.setdefault(code, False)
+
+
+def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
+    global rules_runtime
+    for k in list(rules_runtime.keys()):
+        if k not in rules:
+            rules_runtime.pop(k, None)
+    for k in rules.keys():
+        if k not in rules_runtime:
+            rules_runtime[k] = {"last_trigger_active": False, "last_executed_at": None}
+
+
+_sync_mode_latches_from_rules(rules_config)
+_sync_rules_runtime(rules_config)
 
 PANEL_STATE_OVERRIDES_KEY = "panel_input_overrides"
 PANEL_STATE_CURRENT_MODE_KEY = "panel_current_mode"
@@ -133,7 +198,7 @@ def _load_panel_state_value(key: str) -> Optional[str]:
 
 
 def _persist_overrides_to_db() -> None:
-    data = {str(board_id): overrides for board_id, overrides in input_overrides.items()}
+    data = {str(mid): input_overrides[mid] for mid in _module_ids() if mid in input_overrides}
     _save_panel_state_value(PANEL_STATE_OVERRIDES_KEY, json.dumps(data))
 
 
@@ -143,6 +208,7 @@ def _persist_current_mode_to_db() -> None:
 
 def _load_persisted_panel_state() -> None:
     global current_mode
+    _sync_runtime_from_db()
     raw_overrides = _load_panel_state_value(PANEL_STATE_OVERRIDES_KEY)
     if raw_overrides:
         try:
@@ -150,8 +216,12 @@ def _load_persisted_panel_state() -> None:
             if isinstance(data, dict):
                 for board_key, values in data.items():
                     board_id = int(board_key)
-                    if board_id in input_overrides and isinstance(values, list) and len(values) == 12:
-                        input_overrides[board_id] = [v if v in (None, True, False) else None for v in values]
+                    if board_id in input_overrides and isinstance(values, list):
+                        n = len(input_overrides[board_id])
+                        merged = [v if v in (None, True, False) else None for v in values[:n]]
+                        while len(merged) < n:
+                            merged.append(None)
+                        input_overrides[board_id] = merged
         except Exception:  # noqa: BLE001
             pass
 
@@ -184,17 +254,24 @@ def add_event(level: str, message: str, board_id: int = 0) -> None:
 
 
 def get_client(board_id: int) -> ModbusTcpClient:
-    cfg = BOARDS_CONFIG.get(board_id)
-    if not cfg:
-        raise HTTPException(status_code=404, detail=f"Placa {board_id} no configurada")
+    _board_cfg(board_id)
     client = clients.get(board_id)
     if client is None or not client.is_socket_open():
-        raise HTTPException(status_code=503, detail=f"Placa {board_id} no conectada")
+        raise HTTPException(status_code=503, detail=f"Módulo {board_id} no conectado")
     return client
 
 
+def _probe_register_address(board_id: int) -> int:
+    ins, outs = pms.get_channels_for_module(board_id)
+    if ins:
+        return int(ins[0]["address"])
+    if outs:
+        return int(outs[0]["address"])
+    return REG_INPUT_START
+
+
 def _connect_board(board_id: int) -> bool:
-    cfg = BOARDS_CONFIG[board_id]
+    cfg = dict(_board_cfg(board_id))
     try:
         if clients[board_id]:
             try:
@@ -225,14 +302,14 @@ def _connect_board(board_id: int) -> bool:
 
             # Validación mínima Modbus
             try:
-                probe = client.read_holding_registers(address=REG_INPUT_START, count=1, device_id=candidate_slave)
+                probe_addr = _probe_register_address(board_id)
+                probe = client.read_holding_registers(address=probe_addr, count=1, device_id=candidate_slave)
                 if probe.isError():
                     raise RuntimeError(f"Probe Modbus error: {probe}")
-                # Handshake correcto: fijar slave_id detectado
                 if cfg["slave_id"] != candidate_slave:
-                    BOARDS_CONFIG[board_id]["slave_id"] = candidate_slave
+                    pms.update_module(board_id, slave_id=candidate_slave)
                     add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
-                cfg = BOARDS_CONFIG[board_id]
+                    cfg = dict(_board_cfg(board_id))
                 break
             except Exception as probe_err:  # noqa: BLE001
                 last_probe_error = str(probe_err)
@@ -254,7 +331,9 @@ def _connect_board(board_id: int) -> bool:
         # Se deja desactivado por defecto para priorizar estabilidad de enlace.
         if DISABLE_IN_OUT_RELATION_ON_CONNECT:
             try:
-                client.write_register(address=REG_IN_OUT_RELATION, value=0x0000, device_id=cfg["slave_id"])
+                rel = cfg.get("relation_register")
+                if rel is not None:
+                    client.write_register(address=int(rel), value=0x0000, device_id=cfg["slave_id"])
             except Exception:
                 pass
         return True
@@ -268,23 +347,26 @@ def _connect_board(board_id: int) -> bool:
 def _read_all_io(board_id: int, retried: bool = False) -> None:
     client = clients.get(board_id)
     if not client or not client.is_socket_open():
-        io_state[board_id]["connected"] = False
+        if board_id in io_state:
+            io_state[board_id]["connected"] = False
         return
 
-    cfg = BOARDS_CONFIG[board_id]
+    cfg = _board_cfg(board_id)
     slave = cfg["slave_id"]
+    ins, outs = pms.get_channels_for_module(board_id)
     try:
-        res_out = client.read_holding_registers(address=REG_OUTPUT_START, count=12, device_id=slave)
-        if not res_out.isError():
-            io_state[board_id]["outputs"] = [bool(res_out.registers[i]) for i in range(12)]
+        for i, ch in enumerate(outs):
+            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+            if not res.isError() and res.registers:
+                io_state[board_id]["outputs"][i] = bool(res.registers[0])
 
-        res_in = client.read_holding_registers(address=REG_INPUT_START, count=12, device_id=slave)
-        if not res_in.isError():
-            io_state[board_id]["inputs_raw"] = [bool(res_in.registers[i]) for i in range(12)]
+        for i, ch in enumerate(ins):
+            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+            if not res.isError() and res.registers:
+                io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
 
-        # Aplicar override de entradas para pruebas/lógica
         effective_inputs: List[bool] = []
-        for idx in range(12):
+        for idx in range(len(ins)):
             forced = input_overrides[board_id][idx]
             raw = io_state[board_id]["inputs_raw"][idx]
             effective_inputs.append(raw if forced is None else forced)
@@ -305,12 +387,18 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
 
 def _write_output(board_id: int, channel: int, state: bool) -> None:
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    register = REG_OUTPUT_START + (channel - 1)
-    value = CMD_OPEN if state else CMD_CLOSE
+    cfg = _board_cfg(board_id)
+    _, outs = pms.get_channels_for_module(board_id)
+    if not 1 <= channel <= len(outs):
+        raise HTTPException(status_code=400, detail=f"Canal OUT {channel} inválido para módulo {board_id}")
+    ch = outs[channel - 1]
+    register = int(ch["address"])
+    open_v = int(ch["open_cmd"]) if ch["open_cmd"] is not None else CMD_OPEN
+    close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
+    value = open_v if state else close_v
     result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
     if result.isError():
-        raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en placa {board_id}: {result}")
+        raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en módulo {board_id}: {result}")
     io_state[board_id]["outputs"][channel - 1] = state
 
 
@@ -338,9 +426,10 @@ def _parse_out_code(code: str) -> tuple[int, int]:
 
 def _read_input_effective(code: str, use_hardware_if_no_override: bool = True) -> bool:
     board_id, channel = _parse_in_code(code)
-    if board_id not in range(1, 4):
-        raise HTTPException(status_code=400, detail=f"Placa inválida en {code}")
-    if not 1 <= channel <= 12:
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=400, detail=f"Módulo inválido en {code}")
+    ins, _ = pms.get_channels_for_module(board_id)
+    if not 1 <= channel <= len(ins):
         raise HTTPException(status_code=400, detail=f"Canal inválido en {code}")
     forced = input_overrides[board_id][channel - 1]
     if forced is not None:
@@ -356,15 +445,19 @@ def _read_input_effective(code: str, use_hardware_if_no_override: bool = True) -
     return io_state[board_id]["inputs"][channel - 1]
 
 
-def _evaluate_horario_automatico(
+def _evaluate_trigger_rule(
+    rule_key: str,
     manual: bool = False,
     use_hardware_if_no_override: bool = True,
     apply_outputs_to_hardware: bool = True,
 ) -> dict:
     global current_mode
-    key = "horario_automatico"
-    rule = rules_config[key]
-    runtime = rules_runtime[key]
+    rule = rules_config.get(rule_key)
+    if not rule:
+        return {"executed": False, "reason": f"Regla no encontrada: {rule_key}"}
+    if rule_key not in rules_runtime:
+        rules_runtime[rule_key] = {"last_trigger_active": False, "last_executed_at": None}
+    runtime = rules_runtime[rule_key]
 
     if not rule.get("enabled", True):
         return {"executed": False, "reason": "Regla deshabilitada"}
@@ -387,19 +480,21 @@ def _evaluate_horario_automatico(
         return {"executed": False, "reason": f"No se ejecuta: {trigger_code} no está activa", "trigger_input_active": False}
 
     if blocked_active_codes:
-        add_event("WARN", f"Horario Automatico bloqueado por {', '.join(blocked_active_codes)}", 1)
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         return {
             "executed": False,
             "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
             "trigger_input_active": trigger_active,
         }
 
-    mode_latches["IN_01_01"] = True
+    mode_latches.setdefault(trigger_code, False)
+    mode_latches[trigger_code] = True
     for code in rule.get("deactivate_modes", []):
+        mode_latches.setdefault(code, False)
         mode_latches[code] = False
         board_id, channel = _parse_in_code(code)
         input_overrides[board_id][channel - 1] = False
-    current_mode = key
+    current_mode = rule_key
     _persist_overrides_to_db()
     _persist_current_mode_to_db()
 
@@ -410,9 +505,10 @@ def _evaluate_horario_automatico(
                 _connect_board(board_id)
             _write_output(board_id, channel, True)
         else:
-            # Modo simulación para pruebas con override, sin dependencia de red/hardware.
-            io_state[board_id]["outputs"][channel - 1] = True
-            add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
+            _, outs = pms.get_channels_for_module(board_id)
+            if 1 <= channel <= len(outs):
+                io_state[board_id]["outputs"][channel - 1] = True
+                add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
     for do_code in rule.get("deactivate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
         if apply_outputs_to_hardware:
@@ -420,11 +516,13 @@ def _evaluate_horario_automatico(
                 _connect_board(board_id)
             _write_output(board_id, channel, False)
         else:
-            io_state[board_id]["outputs"][channel - 1] = False
-            add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
+            _, outs = pms.get_channels_for_module(board_id)
+            if 1 <= channel <= len(outs):
+                io_state[board_id]["outputs"][channel - 1] = False
+                add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
 
     runtime["last_executed_at"] = datetime.now().isoformat()
-    add_event("OK", "Regla Horario Automatico ejecutada", 1)
+    add_event("OK", f"Regla ejecutada: {rule_key}", 1)
     return {
         "executed": True,
         "mode": current_mode,
@@ -437,12 +535,34 @@ def _evaluate_horario_automatico(
     }
 
 
+def _evaluate_horario_automatico(
+    manual: bool = False,
+    use_hardware_if_no_override: bool = True,
+    apply_outputs_to_hardware: bool = True,
+) -> dict:
+    """Compatibilidad: misma lógica que la regla `horario_automatico` si existe."""
+    if "horario_automatico" not in rules_config:
+        return {"executed": False, "reason": "No hay regla horario_automatico"}
+    return _evaluate_trigger_rule(
+        "horario_automatico",
+        manual=manual,
+        use_hardware_if_no_override=use_hardware_if_no_override,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+    )
+
+
 def _evaluate_auto_rules() -> None:
-    if rules_config.get("horario_automatico", {}).get("auto_execute", True):
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("auto_execute", True):
+            continue
+        if rule.get("type") != "enclavamiento":
+            continue
         try:
-            _evaluate_horario_automatico(manual=False)
+            _evaluate_trigger_rule(rk, manual=False)
         except Exception as e:  # noqa: BLE001
-            add_event("ERR", f"Error auto-evaluando Horario Automatico: {e}", 1)
+            add_event("ERR", f"Error auto-evaluando {rk}: {e}", 1)
 
 
 def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) -> dict:
@@ -476,10 +596,12 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             if not io_state[b]["connected"]:
                 _connect_board(b)
             if not io_state[b]["connected"]:
-                raise HTTPException(status_code=503, detail=f"No se pudo conectar placa {b} para {out_code}")
+                raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {b} para {out_code}")
             _write_output(b, ch, True)
         else:
-            io_state[b]["outputs"][ch - 1] = True
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = True
 
     for out_code in rule.get("deactivate_outputs", []):
         b, ch = _parse_out_code(out_code)
@@ -487,10 +609,12 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             if not io_state[b]["connected"]:
                 _connect_board(b)
             if not io_state[b]["connected"]:
-                raise HTTPException(status_code=503, detail=f"No se pudo conectar placa {b} para {out_code}")
+                raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {b} para {out_code}")
             _write_output(b, ch, False)
         else:
-            io_state[b]["outputs"][ch - 1] = False
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = False
 
     current_mode = rule_key
     _persist_overrides_to_db()
@@ -535,6 +659,50 @@ class RulesUpdateBody(BaseModel):
     rules: Dict[str, dict]
 
 
+class ModuleCreateBody(BaseModel):
+    name: str
+    host: str
+    port: int = 5000
+    slave_id: int = 1
+
+
+class ModuleUpdateBody(BaseModel):
+    name: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    slave_id: Optional[int] = None
+    sort_order: Optional[int] = None
+    bitmask_address: Optional[int] = None
+    relation_register: Optional[int] = None
+
+
+class ChannelCreateBody(BaseModel):
+    kind: str
+    address: int
+    slot_index: Optional[int] = None
+    label: Optional[str] = None
+    open_cmd: Optional[int] = None
+    close_cmd: Optional[int] = None
+
+
+class ChannelPatchBody(BaseModel):
+    slot_index: Optional[int] = None
+    label: Optional[str] = None
+    address: Optional[int] = None
+    open_cmd: Optional[int] = None
+    close_cmd: Optional[int] = None
+
+
+class BulkCommandPair(BaseModel):
+    address: int
+    value: int
+
+
+class BulkCommandsBody(BaseModel):
+    all_on: Optional[BulkCommandPair] = None
+    all_off: Optional[BulkCommandPair] = None
+
+
 @router.get("/")
 def root():
     return {"service": "ETD8A12 Panel API", "status": "running", "timestamp": datetime.now().isoformat()}
@@ -542,20 +710,28 @@ def root():
 
 @router.get("/status")
 def get_status():
-    for board_id in range(1, 4):
-        if io_state[board_id]["connected"]:
+    cfg_map = pms.get_boards_config_map()
+    for board_id in _module_ids():
+        if board_id in io_state and io_state[board_id]["connected"]:
             _read_all_io(board_id)
     _evaluate_auto_rules()
     return {
         "boards": {
             str(bid): {
                 "id": bid,
-                "config": BOARDS_CONFIG[bid],
-                **io_state[bid],
-                "input_overrides": input_overrides[bid],
+                "config": {
+                    "name": cfg_map[bid]["name"],
+                    "host": cfg_map[bid]["host"],
+                    "port": cfg_map[bid]["port"],
+                    "slave_id": cfg_map[bid]["slave_id"],
+                },
+                **io_state.get(bid, {}),
+                "input_overrides": input_overrides.get(bid, []),
             }
-            for bid in range(1, 4)
+            for bid in _module_ids()
+            if bid in cfg_map
         },
+        "modules_config": pms.get_full_config_for_api(),
         "current_mode": current_mode,
         "timestamp": datetime.now().isoformat(),
     }
@@ -574,8 +750,8 @@ def connect_board(board_id: int):
 
 @router.post("/boards/{board_id}/disconnect")
 def disconnect_board(board_id: int):
-    if board_id not in range(1, 4):
-        raise HTTPException(status_code=404, detail="board_id debe ser 1, 2 o 3")
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
     client = clients.get(board_id)
     if client:
         client.close()
@@ -587,25 +763,29 @@ def disconnect_board(board_id: int):
 
 @router.put("/boards/{board_id}/config")
 def update_board_config(board_id: int, config: BoardConfig):
-    if board_id not in range(1, 4):
-        raise HTTPException(status_code=404, detail="board_id debe ser 1, 2 o 3")
-    BOARDS_CONFIG[board_id]["host"] = config.host
-    BOARDS_CONFIG[board_id]["port"] = config.port
-    BOARDS_CONFIG[board_id]["slave_id"] = config.slave_id
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
     if config.name:
-        BOARDS_CONFIG[board_id]["name"] = config.name
-    add_event("INFO", f"Config actualizada: {config.host}:{config.port} slave={config.slave_id}", board_id)
-    return {"board_id": board_id, "config": BOARDS_CONFIG[board_id]}
+        pms.update_module(board_id, host=config.host, port=config.port, slave_id=config.slave_id, name=config.name)
+    else:
+        pms.update_module(board_id, host=config.host, port=config.port, slave_id=config.slave_id)
+    cfg = _board_cfg(board_id)
+    add_event("INFO", f"Config actualizada: {cfg['host']}:{cfg['port']} slave={cfg['slave_id']}", board_id)
+    return {"board_id": board_id, "config": {"name": cfg["name"], "host": cfg["host"], "port": cfg["port"], "slave_id": cfg["slave_id"]}}
 
 
 @router.post("/boards/{board_id}/output")
 def set_output(board_id: int, action: ChannelAction):
-    if not 1 <= action.channel <= 12:
-        raise HTTPException(status_code=400, detail="Canal debe estar entre 1 y 12")
+    _, outs = pms.get_channels_for_module(board_id)
+    if not 1 <= action.channel <= len(outs):
+        raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(outs)}")
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    register = REG_OUTPUT_START + (action.channel - 1)
-    value = CMD_OPEN if action.state else CMD_CLOSE
+    cfg = _board_cfg(board_id)
+    ch = outs[action.channel - 1]
+    register = int(ch["address"])
+    open_v = int(ch["open_cmd"]) if ch["open_cmd"] is not None else CMD_OPEN
+    close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
+    value = open_v if action.state else close_v
     try:
         result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
         if result.isError():
@@ -620,11 +800,16 @@ def set_output(board_id: int, action: ChannelAction):
 @router.post("/boards/{board_id}/outputs/all_on")
 def all_outputs_on(board_id: int):
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    result = client.write_register(address=REG_OUTPUT_START, value=CMD_OPEN_ALL, device_id=cfg["slave_id"])
+    cfg = _board_cfg(board_id)
+    bulk = pms.get_bulk_commands(board_id)
+    if "all_on" not in bulk:
+        raise HTTPException(status_code=400, detail="No hay comando all_on configurado para este módulo")
+    addr, val = bulk["all_on"]
+    result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
-    io_state[board_id]["outputs"] = [True] * 12
+    n_out = len(io_state[board_id]["outputs"])
+    io_state[board_id]["outputs"] = [True] * n_out
     add_event("OK", "Todas las salidas ON", board_id)
     return {"board_id": board_id, "all_outputs": True}
 
@@ -632,29 +817,39 @@ def all_outputs_on(board_id: int):
 @router.post("/boards/{board_id}/outputs/all_off")
 def all_outputs_off(board_id: int):
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    result = client.write_register(address=REG_OUTPUT_START, value=CMD_CLOSE_ALL, device_id=cfg["slave_id"])
+    cfg = _board_cfg(board_id)
+    bulk = pms.get_bulk_commands(board_id)
+    if "all_off" not in bulk:
+        raise HTTPException(status_code=400, detail="No hay comando all_off configurado para este módulo")
+    addr, val = bulk["all_off"]
+    result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
-    io_state[board_id]["outputs"] = [False] * 12
+    n_out = len(io_state[board_id]["outputs"])
+    io_state[board_id]["outputs"] = [False] * n_out
     add_event("OK", "Todas las salidas OFF", board_id)
     return {"board_id": board_id, "all_outputs": False}
 
 
 @router.post("/boards/{board_id}/outputs/bitmask")
 def set_outputs_bitmask(board_id: int, action: BitmaskAction):
+    _, outs = pms.get_channels_for_module(board_id)
+    n_out = len(outs)
     for ch in action.channels_on:
-        if not 1 <= ch <= 12:
-            raise HTTPException(status_code=400, detail=f"Canal {ch} inválido (1-12)")
+        if not 1 <= ch <= n_out:
+            raise HTTPException(status_code=400, detail=f"Canal {ch} inválido (1-{n_out})")
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
+    cfg = _board_cfg(board_id)
+    bm_addr = cfg.get("bitmask_address")
+    if bm_addr is None:
+        raise HTTPException(status_code=400, detail="Este módulo no tiene bitmask_address configurado")
     bitmask = 0
     for ch in action.channels_on:
-        bitmask |= (1 << (ch - 1))
-    result = client.write_register(address=REG_OUTPUT_BITS, value=bitmask, device_id=cfg["slave_id"])
+        bitmask |= 1 << (ch - 1)
+    result = client.write_register(address=int(bm_addr), value=bitmask, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
-    for i in range(12):
+    for i in range(n_out):
         io_state[board_id]["outputs"][i] = bool((bitmask >> i) & 1)
     add_event("OK", f"Bitmask 0x{bitmask:04X}", board_id)
     return {"board_id": board_id, "bitmask": hex(bitmask), "channels_on": sorted(action.channels_on)}
@@ -663,32 +858,40 @@ def set_outputs_bitmask(board_id: int, action: BitmaskAction):
 @router.get("/boards/{board_id}/inputs")
 def read_inputs(board_id: int):
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    res = client.read_holding_registers(address=REG_INPUT_START, count=12, device_id=cfg["slave_id"])
-    if res.isError():
-        raise HTTPException(status_code=502, detail="Error leyendo entradas")
-    values_raw = [bool(res.registers[i]) for i in range(12)]
+    cfg = _board_cfg(board_id)
+    ins, _ = pms.get_channels_for_module(board_id)
+    slave = cfg["slave_id"]
+    values_raw: List[bool] = []
+    for ch in ins:
+        res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+        if res.isError() or not res.registers:
+            raise HTTPException(status_code=502, detail="Error leyendo entradas")
+        values_raw.append(bool(res.registers[0]))
     io_state[board_id]["inputs_raw"] = values_raw
-    values_effective = [values_raw[i] if input_overrides[board_id][i] is None else input_overrides[board_id][i] for i in range(12)]
+    values_effective = [values_raw[i] if input_overrides[board_id][i] is None else input_overrides[board_id][i] for i in range(len(values_raw))]
     io_state[board_id]["inputs"] = values_effective
     return {
         "board_id": board_id,
-        "inputs_raw": {f"IN{i+1}": values_raw[i] for i in range(12)},
-        "inputs_effective": {f"IN{i+1}": values_effective[i] for i in range(12)},
-        "input_overrides": {f"IN{i+1}": input_overrides[board_id][i] for i in range(12)},
+        "inputs_raw": {f"IN{i+1}": values_raw[i] for i in range(len(values_raw))},
+        "inputs_effective": {f"IN{i+1}": values_effective[i] for i in range(len(values_effective))},
+        "input_overrides": {f"IN{i+1}": input_overrides[board_id][i] for i in range(len(input_overrides[board_id]))},
     }
 
 
 @router.get("/boards/{board_id}/outputs")
 def read_outputs(board_id: int):
     client = get_client(board_id)
-    cfg = BOARDS_CONFIG[board_id]
-    res = client.read_holding_registers(address=REG_OUTPUT_START, count=12, device_id=cfg["slave_id"])
-    if res.isError():
-        raise HTTPException(status_code=502, detail="Error leyendo salidas")
-    values = [bool(res.registers[i]) for i in range(12)]
+    cfg = _board_cfg(board_id)
+    _, outs = pms.get_channels_for_module(board_id)
+    slave = cfg["slave_id"]
+    values: List[bool] = []
+    for ch in outs:
+        res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+        if res.isError() or not res.registers:
+            raise HTTPException(status_code=502, detail="Error leyendo salidas")
+        values.append(bool(res.registers[0]))
     io_state[board_id]["outputs"] = values
-    return {"board_id": board_id, "outputs": {f"OUT{i+1}": values[i] for i in range(12)}}
+    return {"board_id": board_id, "outputs": {f"OUT{i+1}": values[i] for i in range(len(values))}}
 
 
 @router.get("/events")
@@ -709,18 +912,22 @@ def clear_events():
 def get_input_overrides():
     return {
         "overrides": {
-            str(board_id): {f"IN{i+1}": input_overrides[board_id][i] for i in range(12)}
-            for board_id in range(1, 4)
+            str(board_id): {
+                f"IN{i+1}": input_overrides[board_id][i] for i in range(len(input_overrides.get(board_id, [])))
+            }
+            for board_id in _module_ids()
+            if board_id in input_overrides
         }
     }
 
 
 @router.post("/inputs/override")
 def set_input_override(action: InputOverrideAction):
-    if action.board_id not in range(1, 4):
-        raise HTTPException(status_code=404, detail="board_id debe ser 1, 2 o 3")
-    if not 1 <= action.channel <= 12:
-        raise HTTPException(status_code=400, detail="Canal debe estar entre 1 y 12")
+    if not _board_exists(action.board_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    ins, _ = pms.get_channels_for_module(action.board_id)
+    if not 1 <= action.channel <= len(ins):
+        raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(ins)}")
     idx = action.channel - 1
     input_overrides[action.board_id][idx] = action.state
     _persist_overrides_to_db()
@@ -730,10 +937,11 @@ def set_input_override(action: InputOverrideAction):
 
 @router.delete("/inputs/override")
 def clear_input_override(board_id: int, channel: int):
-    if board_id not in range(1, 4):
-        raise HTTPException(status_code=404, detail="board_id debe ser 1, 2 o 3")
-    if not 1 <= channel <= 12:
-        raise HTTPException(status_code=400, detail="Canal debe estar entre 1 y 12")
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    ins, _ = pms.get_channels_for_module(board_id)
+    if not 1 <= channel <= len(ins):
+        raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(ins)}")
     idx = channel - 1
     input_overrides[board_id][idx] = None
     _persist_overrides_to_db()
@@ -761,6 +969,8 @@ def get_rules():
 def update_rules(body: RulesUpdateBody):
     global rules_config
     rules_config = body.rules
+    _sync_mode_latches_from_rules(rules_config)
+    _sync_rules_runtime(rules_config)
     _save_rules_to_disk(rules_config)
     add_event("INFO", "Reglas actualizadas por JSON", 1)
     return {"ok": True, "rules": rules_config}
@@ -782,22 +992,156 @@ def run_horario_automatico():
     return _execute_rule_forced("horario_automatico", apply_outputs_to_hardware=True)
 
 
-@router.post("/rules/evaluate")
-def evaluate_rules_now(force_trigger_override: bool = True):
-    """
-    Evalúa reglas en modo manual.
-    Por defecto en pruebas fuerza override del trigger para facilitar validación.
-    """
-    if force_trigger_override:
-        trigger_code = rules_config.get("horario_automatico", {}).get("trigger", "IN_01_01")
-        board_id, channel = _parse_in_code(trigger_code)
-        input_overrides[board_id][channel - 1] = True
-        _persist_overrides_to_db()
-        add_event("INFO", f"Evaluate reglas: trigger {trigger_code} forzado por override", board_id)
+@router.get("/modules")
+def list_modules_config():
+    return {"modules": pms.get_full_config_for_api()}
 
-    result = _evaluate_horario_automatico(
+
+@router.post("/modules")
+def create_module_api(body: ModuleCreateBody):
+    mid = pms.create_module(body.name, body.host, body.port, body.slave_id)
+    _sync_runtime_from_db()
+    add_event("INFO", f"Módulo creado id={mid} {body.name}", mid)
+    mod = next((m for m in pms.get_full_config_for_api() if m["id"] == mid), None)
+    return {"id": mid, "module": mod}
+
+
+@router.put("/modules/{module_id}")
+def update_module_api(module_id: int, body: ModuleUpdateBody):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    patch = body.model_dump(exclude_unset=True)
+    if patch:
+        pms.apply_module_update(module_id, patch)
+    _sync_runtime_from_db()
+    add_event("INFO", "Módulo actualizado en configuración", module_id)
+    return {"id": module_id, "config": _board_cfg(module_id)}
+
+
+@router.delete("/modules/{module_id}")
+def delete_module_api(module_id: int):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    c = clients.pop(module_id, None)
+    if c:
+        try:
+            c.close()
+        except Exception:
+            pass
+    pms.delete_module(module_id)
+    _sync_runtime_from_db()
+    add_event("WARN", "Módulo eliminado de la configuración", module_id)
+    return {"ok": True, "id": module_id}
+
+
+@router.post("/modules/{module_id}/channels")
+def add_channel_api(module_id: int, body: ChannelCreateBody):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    cid = pms.add_channel(
+        module_id,
+        body.kind,
+        body.address,
+        slot_index=body.slot_index,
+        label=body.label,
+        open_cmd=body.open_cmd,
+        close_cmd=body.close_cmd,
+    )
+    _sync_runtime_from_db()
+    add_event("INFO", f"Canal {body.kind} id={cid} addr=0x{body.address:X}", module_id)
+    return {"channel_id": cid}
+
+
+@router.put("/modules/{module_id}/channels/{channel_id}")
+def patch_channel_api(module_id: int, channel_id: int, body: ChannelPatchBody):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT module_id FROM panel_module_channels WHERE id = ?",
+            (channel_id,),
+        ).fetchone()
+    if not row or row[0] != module_id:
+        raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
+    pms.update_channel(
+        channel_id,
+        slot_index=body.slot_index,
+        label=body.label,
+        address=body.address,
+        open_cmd=body.open_cmd,
+        close_cmd=body.close_cmd,
+    )
+    _sync_runtime_from_db()
+    return {"ok": True, "channel_id": channel_id}
+
+
+@router.delete("/modules/{module_id}/channels/{channel_id}")
+def delete_channel_api(module_id: int, channel_id: int):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT module_id FROM panel_module_channels WHERE id = ?",
+            (channel_id,),
+        ).fetchone()
+    if not row or row[0] != module_id:
+        raise HTTPException(status_code=404, detail="Canal no encontrado")
+    pms.delete_channel(channel_id)
+    _sync_runtime_from_db()
+    add_event("INFO", f"Canal eliminado id={channel_id}", module_id)
+    return {"ok": True}
+
+
+@router.put("/modules/{module_id}/bulk")
+def set_bulk_commands_api(module_id: int, body: BulkCommandsBody):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    if body.all_on:
+        pms.set_bulk_command(module_id, "all_on", body.all_on.address, body.all_on.value)
+    if body.all_off:
+        pms.set_bulk_command(module_id, "all_off", body.all_off.address, body.all_off.value)
+    _sync_runtime_from_db()
+    add_event("INFO", "Comandos all_on / all_off actualizados", module_id)
+    return {"bulk": pms.get_bulk_commands(module_id)}
+
+
+@router.post("/rules/evaluate")
+def evaluate_rules_now(force_trigger_override: bool = True, rule_key: Optional[str] = None):
+    """
+    Evalúa una regla tipo enclavamiento en modo manual (flanco / trigger).
+    Si no se indica rule_key, se usa `horario_automatico` si existe; si no, la primera regla enclavamiento habilitada.
+    """
+    if not rules_config:
+        raise HTTPException(status_code=400, detail="No hay reglas configuradas")
+
+    rk = rule_key
+    if rk is None:
+        if "horario_automatico" in rules_config:
+            rk = "horario_automatico"
+        else:
+            for cand, r in rules_config.items():
+                if r.get("type") == "enclavamiento" and r.get("enabled", True):
+                    rk = cand
+                    break
+    if rk is None or rk not in rules_config:
+        raise HTTPException(status_code=400, detail="Indica rule_key o define al menos una regla enclavamiento")
+
+    rule = rules_config[rk]
+    if rule.get("type") != "enclavamiento":
+        raise HTTPException(status_code=400, detail=f"La regla {rk} no es tipo enclavamiento (auto-evaluable en este endpoint)")
+
+    if force_trigger_override:
+        trigger_code = rule.get("trigger", "IN_01_01")
+        if trigger_code:
+            b, ch = _parse_in_code(trigger_code)
+            input_overrides[b][ch - 1] = True
+            _persist_overrides_to_db()
+            add_event("INFO", f"Evaluate: trigger {trigger_code} forzado por override", b)
+
+    result = _evaluate_trigger_rule(
+        rk,
         manual=True,
         use_hardware_if_no_override=not force_trigger_override,
         apply_outputs_to_hardware=not force_trigger_override,
     )
-    return {"ok": True, "results": {"horario_automatico": result}}
+    return {"ok": True, "results": {rk: result}, "rule_key": rk}

@@ -1,0 +1,89 @@
+{
+  "horario_automatico": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "enclavamiento",
+    "trigger": "IN_01_01",
+    "blocked_if_active": [
+      "IN_01_10"
+    ],
+    "deactivate_modes": [
+      "IN_01_02",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "activate_outputs": [
+      "OUT_01_03",
+      "OUT_01_04",
+      "OUT_01_05",
+      "OUT_01_06"
+    ],
+    "deactivate_outputs": [
+      "OUT_01_01",
+      "OUT_01_02",
+      "OUT_01_07",
+      "OUT_01_08"
+    ]
+  },
+  "horario_exclusa": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "enclavamiento",
+    "trigger": "IN_01_02",
+    "blocked_if_active": [
+      "IN_01_10"
+    ],
+    "deactivate_modes": [
+      "IN_01_01",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "activate_outputs": [
+      "OUT_01_01",
+      "OUT_01_02",
+      "OUT_01_07",
+      "OUT_01_08"
+    ],
+    "deactivate_outputs": [
+      "OUT_01_03",
+      "OUT_01_04",
+      "OUT_01_05",
+      "OUT_01_06"
+    ]
+  },
+  "horario_cerrado": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "enclavamiento",
+    "trigger": "IN_01_03",
+    "blocked_if_active": [
+      "IN_01_10"
+    ],
+    "deactivate_modes": [
+      "IN_01_01",
+      "IN_01_02",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "activate_outputs": [
+      "OUT_01_03",
+      "OUT_01_04",
+      "OUT_01_05",
+      "OUT_01_06"
+    ],
+    "deactivate_outputs": [
+      "OUT_01_01",
+      "OUT_01_02",
+      "OUT_01_07",
+      "OUT_01_08"
+    ]
+  }
+}
