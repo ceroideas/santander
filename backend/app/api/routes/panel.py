@@ -92,18 +92,7 @@ def _sync_runtime_from_db() -> None:
 event_log: List[dict] = []
 mode_latches: Dict[str, bool] = {}
 current_mode: Optional[str] = None
-DEFAULT_RULES_CONFIG: Dict[str, dict] = {
-    "horario_automatico": {
-        "enabled": True,
-        "auto_execute": True,
-        "type": "enclavamiento",
-        "trigger": "IN_01_01",
-        "blocked_if_active": ["IN_01_10"],
-        "deactivate_modes": ["IN_01_02", "IN_01_03", "IN_01_04", "IN_01_05", "IN_01_06", "IN_01_07"],
-        "activate_outputs": ["OUT_02_05", "OUT_02_06", "OUT_03_05", "OUT_03_06"],
-        "deactivate_outputs": [],
-    }
-}
+DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
 
@@ -112,10 +101,10 @@ def _load_rules_from_disk() -> Dict[str, dict]:
     try:
         if RULES_FILE.exists():
             raw = json.loads(RULES_FILE.read_text(encoding="utf-8"))
-            if isinstance(raw, dict) and raw:
+            if isinstance(raw, dict):
                 return raw
     except Exception:  # noqa: BLE001
-        # Si falla lectura, se usan reglas por defecto.
+        # Si falla lectura, se continúa sin reglas.
         pass
     return DEFAULT_RULES_CONFIG.copy()
 
