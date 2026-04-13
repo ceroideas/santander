@@ -14,6 +14,8 @@ const C = {
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
 const TABS = ["Panel", "Módulos I/O", "Histórico", "Configuración", "Definición módulos"];
+const IN_PLACEHOLDERS = Array.from({ length: 12 }, (_, i) => `0x${(0x0080 + i).toString(16).toUpperCase().padStart(4, "0")}`);
+const OUT_PLACEHOLDERS = Array.from({ length: 12 }, (_, i) => `0x${(0x0000 + i).toString(16).toUpperCase().padStart(4, "0")}`);
 
 const Dot = ({ active, color, size = 8 }) => (
   <div style={{ width: size, height: size, borderRadius: "50%", background: active ? color : C.surfaceAlt, border: `1.5px solid ${active ? color : C.border}` }} />
@@ -483,9 +485,9 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><div style={{ fontSize: 11, color: C.muted }}>Nombre</div><input value={name} onChange={(e) => setName(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
-        <div><div style={{ fontSize: 11, color: C.muted }}>IP</div><input value={host} onChange={(e) => setHost(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
-        <div><div style={{ fontSize: 11, color: C.muted }}>Puerto</div><input type="number" value={port} onChange={(e) => setPort(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
-        <div><div style={{ fontSize: 11, color: C.muted }}>Slave</div><input type="number" value={slaveId} onChange={(e) => setSlaveId(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
+        <div><div style={{ fontSize: 11, color: C.muted }}>IP</div><input value={host} placeholder="192.168.1.101" onChange={(e) => setHost(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
+        <div><div style={{ fontSize: 11, color: C.muted }}>Puerto</div><input type="number" value={port} placeholder="5000" onChange={(e) => setPort(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
+        <div><div style={{ fontSize: 11, color: C.muted }}>Slave</div><input type="number" value={slaveId} placeholder="1" onChange={(e) => setSlaveId(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
         <div><div style={{ fontSize: 11, color: C.muted }}>Bitmask reg. (opc., p.ej. 0x70)</div><input value={bitmask} onChange={(e) => setBitmask(e.target.value)} placeholder="vacío = sin bitmask" style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
@@ -497,10 +499,10 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
 
       <div style={{ marginTop: 14, fontSize: 11, fontWeight: 700, color: C.textMid }}>All ON / All OFF (holding register)</div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginTop: 6 }}>
-        <input title="all_on address" value={bulkOnA} onChange={(e) => setBulkOnA(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
-        <input title="all_on value" value={bulkOnV} onChange={(e) => setBulkOnV(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
-        <input title="all_off address" value={bulkOffA} onChange={(e) => setBulkOffA(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
-        <input title="all_off value" value={bulkOffV} onChange={(e) => setBulkOffV(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input title="all_on address" placeholder="0x0000" value={bulkOnA} onChange={(e) => setBulkOnA(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input title="all_on value" placeholder="0x0700" value={bulkOnV} onChange={(e) => setBulkOnV(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input title="all_off address" placeholder="0x0000" value={bulkOffA} onChange={(e) => setBulkOffA(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input title="all_off value" placeholder="0x0800" value={bulkOffV} onChange={(e) => setBulkOffV(e.target.value)} style={{ padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>Columnas: all_on addr · all_on valor · all_off addr · all_off valor (decimal o 0x…)</div>
       <div style={{ marginTop: 6 }}>
@@ -521,8 +523,11 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
         </tbody>
       </table>
       <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-        <input value={inAddr} onChange={(e) => setInAddr(e.target.value)} placeholder="Dirección IN" style={{ flex: 1, minWidth: 120, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input value={inAddr} onChange={(e) => setInAddr(e.target.value)} placeholder={IN_PLACEHOLDERS[(inp.length || 0) % 12]} style={{ flex: 1, minWidth: 120, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
         <Btn small onClick={() => addCh("input")}>Añadir IN</Btn>
+      </div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+        Referencia IN (12): {IN_PLACEHOLDERS.join(", ")}
       </div>
 
       <div style={{ marginTop: 14, fontSize: 11, fontWeight: 700, color: C.textMid }}>Salidas ({out.length})</div>
@@ -539,10 +544,13 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
         </tbody>
       </table>
       <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <input value={outAddr} onChange={(e) => setOutAddr(e.target.value)} placeholder="Dir. registro OUT" style={{ flex: 1, minWidth: 100, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+        <input value={outAddr} onChange={(e) => setOutAddr(e.target.value)} placeholder={OUT_PLACEHOLDERS[(out.length || 0) % 12]} style={{ flex: 1, minWidth: 100, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
         <input value={outOpen} onChange={(e) => setOutOpen(e.target.value)} placeholder="ON 0x100 (opc.)" style={{ width: 100, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
         <input value={outClose} onChange={(e) => setOutClose(e.target.value)} placeholder="OFF 0x200 (opc.)" style={{ width: 100, padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
         <Btn small onClick={() => addCh("output")}>Añadir OUT</Btn>
+      </div>
+      <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+        Referencia OUT (12): {OUT_PLACEHOLDERS.join(", ")}
       </div>
     </Card>
   );
@@ -554,7 +562,7 @@ export default function ETD8A12Panel() {
   const [boards, setBoards] = useState({});
   const [boardConfigs, setConfigs] = useState({});
   const [moduleList, setModuleList] = useState([]);
-  const [draftNewMod, setDraftNewMod] = useState({ name: "", host: "", port: 5000, slave_id: 1 });
+  const [draftNewMod, setDraftNewMod] = useState({ name: "", host: "", port: "", slave_id: "" });
   const [events, setEvents] = useState([]);
   const [uiLog, setUiLog] = useState([]);
   const [pending, setPending] = useState({});
@@ -775,11 +783,11 @@ export default function ETD8A12Panel() {
         body: JSON.stringify({
           name: draftNewMod.name.trim(),
           host: draftNewMod.host.trim(),
-          port: Number(draftNewMod.port) || 5000,
-          slave_id: Number(draftNewMod.slave_id) || 1,
+          port: Number(draftNewMod.port || 5000),
+          slave_id: Number(draftNewMod.slave_id || 1),
         }),
       });
-      setDraftNewMod({ name: "", host: "", port: 5000, slave_id: 1 });
+      setDraftNewMod({ name: "", host: "", port: "", slave_id: "" });
       await refreshModuleList();
       addUI("OK", "Módulo creado. Añade IN/OUT y all on/off en su tarjeta.");
     } catch (e) {
@@ -1158,15 +1166,15 @@ export default function ETD8A12Panel() {
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: C.muted }}>IP</div>
-                  <input value={draftNewMod.host} onChange={(e) => setDraftNewMod((p) => ({ ...p, host: e.target.value }))} style={{ padding: 6, width: 140, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+                  <input value={draftNewMod.host} placeholder="192.168.1.101" onChange={(e) => setDraftNewMod((p) => ({ ...p, host: e.target.value }))} style={{ padding: 6, width: 140, border: `1px solid ${C.border}`, borderRadius: 6 }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: C.muted }}>Puerto</div>
-                  <input type="number" value={draftNewMod.port} onChange={(e) => setDraftNewMod((p) => ({ ...p, port: Number(e.target.value) }))} style={{ padding: 6, width: 88, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+                  <input type="number" value={draftNewMod.port} placeholder="5000" onChange={(e) => setDraftNewMod((p) => ({ ...p, port: e.target.value }))} style={{ padding: 6, width: 88, border: `1px solid ${C.border}`, borderRadius: 6 }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: C.muted }}>Slave</div>
-                  <input type="number" value={draftNewMod.slave_id} onChange={(e) => setDraftNewMod((p) => ({ ...p, slave_id: Number(e.target.value) }))} style={{ padding: 6, width: 72, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+                  <input type="number" value={draftNewMod.slave_id} placeholder="1" onChange={(e) => setDraftNewMod((p) => ({ ...p, slave_id: e.target.value }))} style={{ padding: 6, width: 72, border: `1px solid ${C.border}`, borderRadius: 6 }} />
                 </div>
                 <Btn variant="primary" onClick={createDraftModule}>Crear módulo</Btn>
                 <Btn onClick={refreshModuleList}>Recargar lista</Btn>
