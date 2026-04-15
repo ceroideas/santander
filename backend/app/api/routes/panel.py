@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from app.db import panel_modules_store as pms
@@ -1134,3 +1134,55 @@ def evaluate_rules_now(force_trigger_override: bool = True, rule_key: Optional[s
         apply_outputs_to_hardware=not force_trigger_override,
     )
     return {"ok": True, "results": {rk: result}, "rule_key": rk}
+
+
+# ─── Funciones usadas por la API tablet v1 (`tablet_v1.py`) ─────────────────
+
+
+def api_v1_list_modes_from_rules() -> List[Dict[str, Any]]:
+    """Lista claves de reglas (modos) tal como están en `panel_rules.json`."""
+    items: List[Dict[str, Any]] = []
+    for key, rule in rules_config.items():
+        items.append(
+            {
+                "key": key,
+                "enabled": bool(rule.get("enabled", True)),
+                "type": rule.get("type"),
+                "auto_execute": rule.get("auto_execute"),
+            }
+        )
+    return items
+
+
+def api_v1_get_current_mode() -> Optional[str]:
+    return current_mode
+
+
+def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
+    """Pone `current_mode` en null solo si coincide con el modo indicado."""
+    global current_mode
+    if current_mode != rule_key:
+        return {"cleared": False, "current_mode": current_mode}
+    current_mode = None
+    _persist_current_mode_to_db()
+    add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
+    return {"cleared": True, "current_mode": None}
+
+
+def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:
+    return _execute_rule_forced(rule_key, apply_outputs_to_hardware=True)
+
+
+def api_v1_set_output_by_code(code: str, on: bool) -> dict:
+    board_id, channel = _parse_out_code(code)
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
+    st = io_state.get(board_id) or {}
+    if not st.get("connected"):
+        _connect_board(board_id)
+    st = io_state.get(board_id) or {}
+    if not st.get("connected"):
+        raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {board_id}")
+    _write_output(board_id, channel, on)
+    add_event("OK", f"Salida (API tablet v1) {code} -> {'ON' if on else 'OFF'}", board_id)
+    return {"code": code, "on": on, "board_id": board_id, "channel": channel}

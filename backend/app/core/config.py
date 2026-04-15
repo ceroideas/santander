@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     # API
     api_prefix: str = "/api"
 
+    # API tablet v1 (JWT)
+    tablet_jwt_secret: str = "cambiar-en-produccion-usar-env"
+    tablet_jwt_expire_minutes: int = 10080  # 7 días
+    # Si está vacío: solo se permite el primer registro sin cabecera; más usuarios requieren definir token.
+    # Si tiene valor: todo registro requiere cabecera X-Tablet-Setup-Token coincidente.
+    tablet_setup_token: Optional[str] = None
+
     # SQLite
     database_url: str = "sqlite:///./data/control_accesos.db"
 

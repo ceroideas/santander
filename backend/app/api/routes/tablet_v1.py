@@ -1,0 +1,134 @@
+"""API v1 para tablet / integraciones: modos del panel, JWT y usuarios."""
+from __future__ import annotations
+
+from typing import Annotated, Literal, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from passlib.context import CryptContext
+from pydantic import BaseModel, Field, model_validator
+
+from app.api.deps_tablet import get_tablet_username
+from app.api.routes import panel
+from app.core.config import settings
+from app.db import tablet_users_store as tus
+from app.services import tablet_jwt
+
+router = APIRouter(prefix="/v1", tags=["Tablet API v1"])
+
+_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+class RegisterBody(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+def _register_allowed(setup_header: Optional[str]) -> None:
+    """
+    - Sin TABLET_SETUP_TOKEN: solo el primer usuario puede registrarse sin cabecera.
+    - Con TABLET_SETUP_TOKEN: toda alta requiere X-Tablet-Setup-Token coincidente.
+    """
+    token = (settings.tablet_setup_token or "").strip()
+    n = tus.count_users()
+    hdr = (setup_header or "").strip()
+    if token:
+        if hdr != token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cabecera X-Tablet-Setup-Token incorrecta o ausente",
+            )
+        return
+    if n == 0:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Ya existen usuarios: define TABLET_SETUP_TOKEN y envía X-Tablet-Setup-Token para registrar más",
+    )
+
+
+@router.post("/auth/register", status_code=status.HTTP_201_CREATED)
+def auth_register(
+    body: RegisterBody,
+    x_tablet_setup_token: Annotated[Optional[str], Header(alias="X-Tablet-Setup-Token")] = None,
+) -> dict:
+    _register_allowed(x_tablet_setup_token)
+    if tus.get_user_by_username(body.username):
+        raise HTTPException(status_code=409, detail="El usuario ya existe")
+    h = _pwd.hash(body.password)
+    uid = tus.create_user(body.username, h)
+    return {"ok": True, "id": uid, "username": body.username.strip()}
+
+
+@router.post("/auth/token", response_model=TokenResponse)
+def auth_token(form: Annotated[OAuth2PasswordRequestForm, Depends()]) -> TokenResponse:
+    row = tus.get_user_by_username(form.username)
+    if not row or not _pwd.verify(form.password, row[2]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    tok = tablet_jwt.create_access_token(row[1])
+    return TokenResponse(access_token=tok)
+
+
+@router.get("/modes")
+def list_modes(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    return {"modes": panel.api_v1_list_modes_from_rules()}
+
+
+@router.get("/get_mode")
+def get_mode(_user: Annotated[str, Depends(get_tablet_username)]) -> dict:
+    return {"current_mode": panel.api_v1_get_current_mode()}
+
+
+class SetModeBody(BaseModel):
+    action: Literal["set_rule", "set_output"]
+    rule_key: Optional[str] = None
+    active: Optional[bool] = None
+    code: Optional[str] = None
+    on: Optional[bool] = None
+    value: Optional[int] = Field(default=None, description="0 u 1 si no se usa on")
+
+    @model_validator(mode="after")
+    def _check_action_fields(self) -> SetModeBody:
+        if self.action == "set_rule":
+            if not self.rule_key or not self.rule_key.strip():
+                raise ValueError("rule_key es obligatorio para set_rule")
+            if self.active is None:
+                raise ValueError("active es obligatorio para set_rule")
+        elif self.action == "set_output":
+            if not self.code or not self.code.strip():
+                raise ValueError("code es obligatorio para set_output")
+            if self.on is None and self.value is None:
+                raise ValueError("Indica on (bool) o value (0/1) para set_output")
+        return self
+
+
+@router.post("/set_mode")
+def set_mode(
+    body: SetModeBody,
+    _user: Annotated[str, Depends(get_tablet_username)],
+) -> dict:
+    if body.action == "set_rule":
+        rk = body.rule_key.strip()  # type: ignore[union-attr]
+        if body.active:
+            result = panel.api_v1_execute_rule_for_tablet(rk)
+            return {"ok": True, "action": "set_rule", "result": result}
+        cleared = panel.api_v1_clear_current_mode_if_match(rk)
+        return {"ok": True, "action": "set_rule", "active": False, **cleared}
+    code = body.code.strip()  # type: ignore[union-attr]
+    on = body.on
+    if on is None and body.value is not None:
+        if body.value not in (0, 1):
+            raise HTTPException(status_code=400, detail="value debe ser 0 o 1")
+        on = bool(body.value)
+    assert on is not None
+    out = panel.api_v1_set_output_by_code(code, on)
+    return {"ok": True, "action": "set_output", **out}
