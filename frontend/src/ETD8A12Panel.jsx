@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { TopNavbar } from "./components/TopNavbar";
+import { GlobalLoader } from "./components/GlobalLoader";
 import {
   faCircleCheck,
   faCircleInfo,
@@ -1225,6 +1226,9 @@ export default function ETD8A12Panel() {
   const [rulesJson, setRulesJson] = useState("");
   const [rulesMap, setRulesMap] = useState({});
   const [selectedMode, setSelectedMode] = useState(null);
+  const [globalLoadingCount, setGlobalLoadingCount] = useState(0);
+  const [initialStatusLoaded, setInitialStatusLoaded] = useState(false);
+  const [initialRulesLoaded, setInitialRulesLoaded] = useState(false);
   const logEnd = useRef(null);
   const statusPollInFlightRef = useRef(false);
 
@@ -1271,8 +1275,28 @@ export default function ETD8A12Panel() {
     [],
   );
 
+  const beginGlobalLoading = useCallback(
+    () => setGlobalLoadingCount((c) => c + 1),
+    [],
+  );
+  const endGlobalLoading = useCallback(
+    () => setGlobalLoadingCount((c) => Math.max(0, c - 1)),
+    [],
+  );
+  const withGlobalLoader = useCallback(
+    async (task) => {
+      beginGlobalLoading();
+      try {
+        return await task();
+      } finally {
+        endGlobalLoading();
+      }
+    },
+    [beginGlobalLoading, endGlobalLoading],
+  );
+
   useEffect(() => {
-    const poll = async () => {
+    const poll = async (isInitial = false) => {
       if (statusPollInFlightRef.current) return;
       statusPollInFlightRef.current = true;
       try {
@@ -1317,11 +1341,12 @@ export default function ETD8A12Panel() {
         setServer(false);
       } finally {
         statusPollInFlightRef.current = false;
+        if (isInitial) setInitialStatusLoaded(true);
       }
     };
-    poll();
+    poll(true);
     // Polling más conservador para no saturar backend/placa.
-    const iv = setInterval(poll, 5000);
+    const iv = setInterval(() => poll(false), 5000);
     return () => clearInterval(iv);
   }, []);
 
@@ -1350,6 +1375,8 @@ export default function ETD8A12Panel() {
         }
       } catch (e) {
         addUI("ERR", `No se pudieron cargar reglas: ${e.message}`);
+      } finally {
+        setInitialRulesLoaded(true);
       }
     };
     loadRules();
@@ -1389,6 +1416,7 @@ export default function ETD8A12Panel() {
       ? `/boards/${id}/disconnect`
       : `/boards/${id}/connect`;
     try {
+      beginGlobalLoading();
       setPending((p) => ({ ...p, [`c${id}`]: true }));
       const res = await apiFetch(endpoint, { method: "POST" });
       const connectedNow = Boolean(res?.state?.connected ?? res?.connected);
@@ -1408,6 +1436,7 @@ export default function ETD8A12Panel() {
       addUI("ERR", `Módulo ${id}: ${e.message}`);
     } finally {
       setPending((p) => ({ ...p, [`c${id}`]: false }));
+      endGlobalLoading();
     }
   };
 
@@ -1428,20 +1457,24 @@ export default function ETD8A12Panel() {
   };
 
   const doAllOn = async (id) => {
-    try {
-      await apiFetch(`/boards/${id}/outputs/all_on`, { method: "POST" });
-      addUI("OK", `Módulo ${id}: todas ON`);
-    } catch (e) {
-      addUI("ERR", e.message);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetch(`/boards/${id}/outputs/all_on`, { method: "POST" });
+        addUI("OK", `Módulo ${id}: todas ON`);
+      } catch (e) {
+        addUI("ERR", e.message);
+      }
+    });
   };
   const doAllOff = async (id) => {
-    try {
-      await apiFetch(`/boards/${id}/outputs/all_off`, { method: "POST" });
-      addUI("WARN", `Módulo ${id}: todas OFF`);
-    } catch (e) {
-      addUI("ERR", e.message);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetch(`/boards/${id}/outputs/all_off`, { method: "POST" });
+        addUI("WARN", `Módulo ${id}: todas OFF`);
+      } catch (e) {
+        addUI("ERR", e.message);
+      }
+    });
   };
   const refreshModuleList = useCallback(async () => {
     try {
@@ -1457,46 +1490,50 @@ export default function ETD8A12Panel() {
   }, [tab, refreshModuleList]);
 
   const createDraftModule = async () => {
-    try {
-      if (!draftNewMod.name.trim() || !draftNewMod.host.trim()) {
-        addUI("ERR", "Nombre e IP son obligatorios");
-        return;
+    await withGlobalLoader(async () => {
+      try {
+        if (!draftNewMod.name.trim() || !draftNewMod.host.trim()) {
+          addUI("ERR", "Nombre e IP son obligatorios");
+          return;
+        }
+        await apiFetch("/modules", {
+          method: "POST",
+          body: JSON.stringify({
+            name: draftNewMod.name.trim(),
+            host: draftNewMod.host.trim(),
+            port: Number(draftNewMod.port || 5000),
+            slave_id: Number(draftNewMod.slave_id || 1),
+          }),
+        });
+        setDraftNewMod({ name: "", host: "", port: "", slave_id: "" });
+        await refreshModuleList();
+        addUI("OK", "Módulo creado. Añade IN/OUT y all on/off en su tarjeta.");
+      } catch (e) {
+        addUI("ERR", e.message);
       }
-      await apiFetch("/modules", {
-        method: "POST",
-        body: JSON.stringify({
-          name: draftNewMod.name.trim(),
-          host: draftNewMod.host.trim(),
-          port: Number(draftNewMod.port || 5000),
-          slave_id: Number(draftNewMod.slave_id || 1),
-        }),
-      });
-      setDraftNewMod({ name: "", host: "", port: "", slave_id: "" });
-      await refreshModuleList();
-      addUI("OK", "Módulo creado. Añade IN/OUT y all on/off en su tarjeta.");
-    } catch (e) {
-      addUI("ERR", e.message);
-    }
+    });
   };
 
   const doConfig = async (id) => {
-    try {
-      const mod = moduleList.find((x) => x.id === id);
-      const bc = boardConfigs[id] || {};
-      const body = {
-        host: bc.host ?? mod?.host ?? "",
-        port: bc.port ?? mod?.port ?? 5000,
-        slave_id: bc.slave_id ?? mod?.slave_id ?? 1,
-        ...(mod?.name ? { name: mod.name } : {}),
-      };
-      await apiFetch(`/boards/${id}/config`, {
-        method: "PUT",
-        body: JSON.stringify(body),
-      });
-      addUI("OK", `Módulo ${id}: config aplicada`);
-    } catch (e) {
-      addUI("ERR", e.message);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        const mod = moduleList.find((x) => x.id === id);
+        const bc = boardConfigs[id] || {};
+        const body = {
+          host: bc.host ?? mod?.host ?? "",
+          port: bc.port ?? mod?.port ?? 5000,
+          slave_id: bc.slave_id ?? mod?.slave_id ?? 1,
+          ...(mod?.name ? { name: mod.name } : {}),
+        };
+        await apiFetch(`/boards/${id}/config`, {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
+        addUI("OK", `Módulo ${id}: config aplicada`);
+      } catch (e) {
+        addUI("ERR", e.message);
+      }
+    });
   };
   const cycleInputOverride = async (boardId, channel) => {
     const idx = channel - 1;
@@ -1529,59 +1566,67 @@ export default function ETD8A12Panel() {
   const toModeLabel = (key) =>
     key.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
   const runRuleByKey = async (ruleKey) => {
-    try {
-      await apiFetch(`/rules/${encodeURIComponent(ruleKey)}/run`, {
-        method: "POST",
-      });
-      addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
-      setSelectedMode(ruleKey);
-    } catch (e) {
-      addUI("ERR", `Error ejecutando modo ${ruleKey}: ${e.message}`);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetch(`/rules/${encodeURIComponent(ruleKey)}/run`, {
+          method: "POST",
+        });
+        addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
+        setSelectedMode(ruleKey);
+      } catch (e) {
+        addUI("ERR", `Error ejecutando modo ${ruleKey}: ${e.message}`);
+      }
+    });
   };
   const saveRulesJson = async () => {
-    try {
-      const parsed = JSON.parse(rulesJson || "{}");
-      await apiFetch("/rules", {
-        method: "PUT",
-        body: JSON.stringify({ rules: parsed }),
-      });
-      setRulesMap(parsed);
-      if (!selectedMode) {
-        const firstKey = Object.keys(parsed)[0] || null;
-        setSelectedMode(firstKey);
+    await withGlobalLoader(async () => {
+      try {
+        const parsed = JSON.parse(rulesJson || "{}");
+        await apiFetch("/rules", {
+          method: "PUT",
+          body: JSON.stringify({ rules: parsed }),
+        });
+        setRulesMap(parsed);
+        if (!selectedMode) {
+          const firstKey = Object.keys(parsed)[0] || null;
+          setSelectedMode(firstKey);
+        }
+        addUI("OK", "Reglas JSON guardadas");
+      } catch (e) {
+        addUI("ERR", `Error guardando reglas JSON: ${e.message}`);
       }
-      addUI("OK", "Reglas JSON guardadas");
-    } catch (e) {
-      addUI("ERR", `Error guardando reglas JSON: ${e.message}`);
-    }
+    });
   };
   const evaluateRulesNow = async () => {
-    try {
-      const rk =
-        selectedMode && rulesMap[selectedMode] != null ? selectedMode : "";
-      const q = rk ? `?rule_key=${encodeURIComponent(rk)}` : "";
-      const res = await apiFetch(`/rules/evaluate${q}`, { method: "POST" });
-      const key = res?.rule_key || Object.keys(res?.results || {})[0];
-      const r = key ? res?.results?.[key] : null;
-      if (r?.executed) addUI("OK", `Regla evaluada: ${toModeLabel(key)}`);
-      else
-        addUI(
-          "WARN",
-          `${key ? toModeLabel(key) : "Regla"}: ${r?.reason || "sin ejecución"}`,
-        );
-    } catch (e) {
-      addUI("ERR", `Error evaluando reglas: ${e.message}`);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        const rk =
+          selectedMode && rulesMap[selectedMode] != null ? selectedMode : "";
+        const q = rk ? `?rule_key=${encodeURIComponent(rk)}` : "";
+        const res = await apiFetch(`/rules/evaluate${q}`, { method: "POST" });
+        const key = res?.rule_key || Object.keys(res?.results || {})[0];
+        const r = key ? res?.results?.[key] : null;
+        if (r?.executed) addUI("OK", `Regla evaluada: ${toModeLabel(key)}`);
+        else
+          addUI(
+            "WARN",
+            `${key ? toModeLabel(key) : "Regla"}: ${r?.reason || "sin ejecución"}`,
+          );
+      } catch (e) {
+        addUI("ERR", `Error evaluando reglas: ${e.message}`);
+      }
+    });
   };
   const clearHistory = async () => {
-    try {
-      await apiFetch("/events", { method: "DELETE" });
-      setEvents([]);
-      addUI("INFO", "Histórico del panel borrado");
-    } catch (e) {
-      addUI("ERR", `No se pudo borrar histórico: ${e.message}`);
-    }
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetch("/events", { method: "DELETE" });
+        setEvents([]);
+        addUI("INFO", "Histórico del panel borrado");
+      } catch (e) {
+        addUI("ERR", `No se pudo borrar histórico: ${e.message}`);
+      }
+    });
   };
 
   const filtered =
@@ -1594,6 +1639,8 @@ export default function ETD8A12Panel() {
   const activeModeLabel = selectedMode
     ? toModeLabel(selectedMode)
     : "Sin modo seleccionado";
+  const showGlobalLoader =
+    globalLoadingCount > 0 || !initialStatusLoaded || !initialRulesLoaded;
 
   return (
     <div
@@ -1605,6 +1652,7 @@ export default function ETD8A12Panel() {
         fontSize: 13,
       }}
     >
+      <GlobalLoader open={showGlobalLoader} message="Procesando..." />
       <TopNavbar
         title="Control de Accesos - ETD8A12"
         tabs={TABS}
