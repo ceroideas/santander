@@ -12,7 +12,5 @@ pydantic-settings>=2.0.0
 pymodbus>=3.5.0
 
 # Seguridad / usuarios (API tablet v1)
-passlib[bcrypt]>=1.7.4
-bcrypt>=4.0.1,<5
 python-jose[cryptography]>=3.3.0
 python-multipart>=0.0.9

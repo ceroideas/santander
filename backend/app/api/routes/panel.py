@@ -698,12 +698,13 @@ def root():
 
 
 @router.get("/status")
-def get_status():
+def get_status(run_auto_rules: bool = False):
     cfg_map = pms.get_boards_config_map()
     for board_id in _module_ids():
         if board_id in io_state and io_state[board_id]["connected"]:
             _read_all_io(board_id)
-    _evaluate_auto_rules()
+    if run_auto_rules:
+        _evaluate_auto_rules()
     return {
         "boards": {
             str(bid): {
@@ -722,6 +723,7 @@ def get_status():
         },
         "modules_config": pms.get_full_config_for_api(),
         "current_mode": current_mode,
+        "auto_rules_executed": run_auto_rules,
         "timestamp": datetime.now().isoformat(),
     }
 
