@@ -5,7 +5,6 @@ from typing import Annotated, Literal, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from passlib.context import CryptContext
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.deps_tablet import get_tablet_username
@@ -13,10 +12,9 @@ from app.api.routes import panel
 from app.core.config import settings
 from app.db import tablet_users_store as tus
 from app.services import tablet_jwt
+from app.services.tablet_password import hash_password, verify_password
 
 router = APIRouter(prefix="/v1", tags=["Tablet API v1"])
-
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class RegisterBody(BaseModel):
@@ -60,7 +58,7 @@ def auth_register(
     _register_allowed(x_tablet_setup_token)
     if tus.get_user_by_username(body.username):
         raise HTTPException(status_code=409, detail="El usuario ya existe")
-    h = _pwd.hash(body.password)
+    h = hash_password(body.password)
     uid = tus.create_user(body.username, h)
     return {"ok": True, "id": uid, "username": body.username.strip()}
 
@@ -68,7 +66,7 @@ def auth_register(
 @router.post("/auth/token", response_model=TokenResponse)
 def auth_token(form: Annotated[OAuth2PasswordRequestForm, Depends()]) -> TokenResponse:
     row = tus.get_user_by_username(form.username)
-    if not row or not _pwd.verify(form.password, row[2]):
+    if not row or not verify_password(form.password, row[2]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos",
