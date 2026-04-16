@@ -2,12 +2,22 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import {
+  faBolt,
+  faBookOpen,
   faCircleCheck,
   faCircleInfo,
   faCircleXmark,
+  faClock,
+  faCode,
   faCubes,
+  faFileImport,
+  faFileLines,
+  faLock,
   faPenToSquare,
+  faPowerOff,
   faSliders,
+  faToggleOff,
+  faToggleOn,
   faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -233,19 +243,31 @@ function buildIoOptions(moduleList) {
 
 function ChipList({ items, onRemove, C }) {
   if (!items.length)
-    return <span style={{ fontSize: 11, color: C.muted }}>Ninguno</span>;
+    return (
+      <span
+        style={{
+          fontSize: 12,
+          color: C.muted,
+          fontStyle: "italic",
+        }}
+      >
+        Ninguno
+      </span>
+    );
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       {items.map((code) => (
         <span
           key={code}
           style={{
             fontSize: 11,
-            padding: "3px 8px",
-            borderRadius: 12,
-            background: C.surfaceAlt,
+            padding: "6px 10px",
+            borderRadius: 8,
+            background: C.white,
             border: `1px solid ${C.border}`,
-            fontFamily: "monospace",
+            fontFamily: "Consolas, monospace",
+            color: C.textMid,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
           {code}
@@ -253,12 +275,15 @@ function ChipList({ items, onRemove, C }) {
             type="button"
             onClick={() => onRemove(code)}
             style={{
-              marginLeft: 6,
+              marginLeft: 8,
               border: "none",
               background: "none",
               cursor: "pointer",
               color: C.red,
               fontWeight: 700,
+              fontSize: 14,
+              lineHeight: 1,
+              verticalAlign: "middle",
             }}
           >
             ×
@@ -293,6 +318,10 @@ function RulesFormAssistant({
   const [pickDeact, setPickDeact] = useState("");
   const [pickOutOn, setPickOutOn] = useState("");
   const [pickOutOff, setPickOutOff] = useState("");
+
+  const assistIcon = (icon, color = C.textSub) => (
+    <FontAwesomeIcon icon={icon} style={{ color, width: 14 }} />
+  );
 
   const slugPreview = useMemo(() => slugRuleKey(wfName), [wfName]);
 
@@ -364,37 +393,103 @@ function RulesFormAssistant({
 
   const ruleKeys = Object.keys(rulesMap || {});
 
+  const assistLbl = {
+    fontSize: 10,
+    fontWeight: 700,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+    color: C.textSub,
+    marginBottom: 6,
+  };
+  const assistSection = {
+    marginBottom: 14,
+    padding: "14px 16px",
+    background: C.white,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+  };
+  const assistIntro = {
+    fontSize: 12,
+    color: C.textSub,
+    lineHeight: 1.55,
+    marginBottom: 16,
+    padding: "12px 14px",
+    background: C.offWhite,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+  };
+  const assistOptionsBar = {
+    display: "flex",
+    gap: 16,
+    flexWrap: "wrap",
+    alignItems: "center",
+    marginBottom: 14,
+    padding: "12px 14px",
+    background: C.surface,
+    border: `1px solid ${C.border}`,
+    borderRadius: 10,
+  };
+  const assistChk = {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    fontSize: 13,
+    fontWeight: 600,
+    color: C.textMid,
+    cursor: "pointer",
+  };
+
   return (
     <Card style={{ flex: "1 1 100%", marginBottom: 12 }}>
       <SecLabel>Asistente: generar JSON de reglas (IN / OUT)</SecLabel>
-      <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+      <div style={assistIntro}>
         El nombre del script se convierte en clave JSON (ej.{" "}
-        <strong>Horario Automático</strong> → <code>horario_automatico</code>).
-        Los códigos siguen el mapa de módulos (IN_YY_ZZ / OUT_YY_ZZ).
+        <strong style={{ color: C.textMid }}>Horario Automático</strong> →{" "}
+        <code
+          style={{
+            fontSize: 11,
+            padding: "2px 6px",
+            borderRadius: 4,
+            background: C.white,
+            border: `1px solid ${C.border}`,
+            color: C.red,
+          }}
+        >
+          horario_automatico
+        </code>
+        ). Los códigos siguen el mapa de módulos (
+        <span style={{ fontFamily: "monospace", fontSize: 11 }}>IN_YY_ZZ</span>{" "}
+        / <span style={{ fontFamily: "monospace", fontSize: 11 }}>OUT_YY_ZZ</span>
+        ).
       </div>
       {ruleKeys.length > 0 && (
         <div
           style={{
+            ...assistSection,
             display: "flex",
-            gap: 8,
+            gap: 12,
             flexWrap: "wrap",
             alignItems: "flex-end",
-            marginBottom: 12,
           }}
         >
-          <div>
-            <div style={{ fontSize: 11, color: C.muted }}>
+          <div style={{ flex: "1 1 220px" }}>
+            <div
+              style={{
+                ...assistLbl,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              {assistIcon(faBookOpen)}
               Cargar regla existente
             </div>
             <select
+              className="rules-assist-control"
               value={loadKey}
               onChange={(e) => setLoadKey(e.target.value)}
-              style={{
-                padding: 6,
-                minWidth: 200,
-                border: `1px solid ${C.border}`,
-                borderRadius: 6,
-              }}
+              style={{ width: "100%", minWidth: 200 }}
             >
               <option value="">—</option>
               {ruleKeys.map((k) => (
@@ -405,49 +500,77 @@ function RulesFormAssistant({
             </select>
           </div>
           <Btn small onClick={loadFromKey} disabled={!loadKey}>
-            Rellenar formulario
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <FontAwesomeIcon icon={faFileImport} />
+              Rellenar formulario
+            </span>
           </Btn>
         </div>
       )}
       <div
         style={{
+          ...assistSection,
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
-          gap: 10,
-          marginBottom: 10,
+          gap: 16,
         }}
       >
         <div>
-          <div style={{ fontSize: 11, color: C.muted }}>
+          <div
+            style={{
+              ...assistLbl,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {assistIcon(faFileLines)}
             Nombre del script (título)
           </div>
           <input
+            className="rules-assist-control"
             value={wfName}
             onChange={(e) => setWfName(e.target.value)}
-            style={{
-              width: "100%",
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
+            style={{ width: "100%" }}
           />
-          <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-            Clave JSON: <code style={{ color: C.textMid }}>{slugPreview}</code>
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 8 }}>
+            Clave JSON:{" "}
+            <code
+              style={{
+                fontSize: 11,
+                padding: "2px 6px",
+                borderRadius: 4,
+                background: C.surfaceAlt,
+                color: C.textMid,
+              }}
+            >
+              {slugPreview}
+            </code>
           </div>
         </div>
         <div>
-          <div style={{ fontSize: 11, color: C.muted }}>
+          <div
+            style={{
+              ...assistLbl,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            {assistIcon(faBolt, C.red)}
             Disparador (trigger IN)
           </div>
           <select
+            className="rules-assist-control"
             value={wfTrigger}
             onChange={(e) => setWfTrigger(e.target.value)}
-            style={{
-              width: "100%",
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
+            style={{ width: "100%" }}
           >
             {ins.map((o) => (
               <option key={o.code} value={o.code}>
@@ -457,17 +580,9 @@ function RulesFormAssistant({
           </select>
         </div>
       </div>
-      <div
-        style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10 }}
-      >
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-          }}
-        >
+      <div style={assistOptionsBar}>
+        <label style={assistChk}>
+          <FontAwesomeIcon icon={faCircleCheck} style={{ color: C.green }} />
           <input
             type="checkbox"
             checked={wfEnabled}
@@ -475,14 +590,8 @@ function RulesFormAssistant({
           />
           Habilitada
         </label>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontSize: 12,
-          }}
-        >
+        <label style={assistChk}>
+          <FontAwesomeIcon icon={faClock} style={{ color: C.amber }} />
           <input
             type="checkbox"
             checked={wfAuto}
@@ -490,16 +599,32 @@ function RulesFormAssistant({
           />
           Auto-ejecutar (polling)
         </label>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 11, color: C.muted }}>Tipo</span>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginLeft: "auto",
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: C.textSub,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <FontAwesomeIcon icon={faSliders} />
+            TIPO
+          </span>
           <select
+            className="rules-assist-control"
             value={wfType}
             onChange={(e) => setWfType(e.target.value)}
-            style={{
-              padding: 4,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
+            style={{ minWidth: 160 }}
           >
             <option value="enclavamiento">enclavamiento</option>
             <option value="manual">manual</option>
@@ -507,224 +632,199 @@ function RulesFormAssistant({
         </div>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={assistSection}>
         <div
           style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.textMid,
-            marginBottom: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            paddingLeft: 10,
+            borderLeft: `3px solid ${C.red}`,
           }}
         >
-          Bloqueos (si estas IN están activas, no se ejecuta)
+          <FontAwesomeIcon icon={faLock} style={{ color: C.red, fontSize: 14 }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+            Bloqueos (si estas IN están activas, no se ejecuta)
+          </span>
         </div>
-        <ChipList
-          items={wfBlocked}
-          onRemove={(c) => setWfBlocked(wfBlocked.filter((x) => x !== c))}
-          C={C}
-        />
-        <div
-          style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}
-        >
-          <select
-            value={pickBl}
-            onChange={(e) => setPickBl(e.target.value)}
-            style={{
-              flex: 1,
-              minWidth: 200,
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
-          >
-            <option value="">Añadir IN de bloqueo…</option>
-            {ins
-              .filter((o) => o.code !== wfTrigger)
-              .map((o) => (
-                <option key={o.code} value={o.code}>
-                  {o.label}
-                </option>
-              ))}
-          </select>
-          <Btn
-            small
-            onClick={() => {
-              if (pickBl && !wfBlocked.includes(pickBl)) {
-                setWfBlocked([...wfBlocked, pickBl]);
-                setPickBl("");
-              }
-            }}
-            disabled={!pickBl}
-          >
-            Añadir
-          </Btn>
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfBlocked}
+            onRemove={(c) => setWfBlocked(wfBlocked.filter((x) => x !== c))}
+            C={C}
+          />
         </div>
-      </div>
-
-      <div style={{ marginBottom: 12 }}>
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.textMid,
-            marginBottom: 4,
+        <select
+          className="rules-assist-control"
+          value={pickBl}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfBlocked((prev) => (prev.includes(v) ? prev : [...prev, v]));
+            setPickBl("");
           }}
+          style={{ width: "100%", minWidth: 200 }}
         >
-          Desactivar modos (IN → override OFF al ejecutar)
-        </div>
-        <ChipList
-          items={wfDeactivate}
-          onRemove={(c) => setWfDeactivate(wfDeactivate.filter((x) => x !== c))}
-          C={C}
-        />
-        <div
-          style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}
-        >
-          <select
-            value={pickDeact}
-            onChange={(e) => setPickDeact(e.target.value)}
-            style={{
-              flex: 1,
-              minWidth: 200,
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
-          >
-            <option value="">Añadir IN a desactivar…</option>
-            {ins.map((o) => (
+          <option value="">Seleccionar IN de bloqueo…</option>
+          {ins
+            .filter((o) => o.code !== wfTrigger)
+            .map((o) => (
               <option key={o.code} value={o.code}>
                 {o.label}
               </option>
             ))}
-          </select>
-          <Btn
-            small
-            onClick={() => {
-              if (pickDeact && !wfDeactivate.includes(pickDeact)) {
-                setWfDeactivate([...wfDeactivate, pickDeact]);
-                setPickDeact("");
-              }
-            }}
-            disabled={!pickDeact}
-          >
-            Añadir
-          </Btn>
-        </div>
+        </select>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={assistSection}>
         <div
           style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.textMid,
-            marginBottom: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            paddingLeft: 10,
+            borderLeft: `3px solid ${C.red}`,
           }}
         >
-          Activar salidas (OUT → ON)
+          <FontAwesomeIcon icon={faPowerOff} style={{ color: C.red, fontSize: 14 }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+            Desactivar modos (IN → override OFF al ejecutar)
+          </span>
         </div>
-        <ChipList
-          items={wfActOut}
-          onRemove={(c) => setWfActOut(wfActOut.filter((x) => x !== c))}
-          C={C}
-        />
-        <div
-          style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfDeactivate}
+            onRemove={(c) => setWfDeactivate(wfDeactivate.filter((x) => x !== c))}
+            C={C}
+          />
+        </div>
+        <select
+          className="rules-assist-control"
+          value={pickDeact}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfDeactivate((prev) => (prev.includes(v) ? prev : [...prev, v]));
+            setPickDeact("");
+          }}
+          style={{ width: "100%", minWidth: 200 }}
         >
-          <select
-            value={pickOutOn}
-            onChange={(e) => setPickOutOn(e.target.value)}
-            style={{
-              flex: 1,
-              minWidth: 200,
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
-          >
-            <option value="">Añadir OUT…</option>
-            {outs.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <Btn
-            small
-            onClick={() => {
-              if (pickOutOn && !wfActOut.includes(pickOutOn)) {
-                setWfActOut([...wfActOut, pickOutOn]);
-                setPickOutOn("");
-              }
-            }}
-            disabled={!pickOutOn}
-          >
-            Añadir
-          </Btn>
-        </div>
+          <option value="">Seleccionar IN a desactivar…</option>
+          {ins.map((o) => (
+            <option key={o.code} value={o.code}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={assistSection}>
         <div
           style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: C.textMid,
-            marginBottom: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            paddingLeft: 10,
+            borderLeft: `3px solid ${C.red}`,
           }}
         >
-          Desactivar salidas (OUT → OFF)
+          <FontAwesomeIcon icon={faToggleOn} style={{ color: C.green, fontSize: 14 }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+            Activar salidas (OUT → ON)
+          </span>
         </div>
-        <ChipList
-          items={wfDeactOut}
-          onRemove={(c) => setWfDeactOut(wfDeactOut.filter((x) => x !== c))}
-          C={C}
-        />
-        <div
-          style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfActOut}
+            onRemove={(c) => setWfActOut(wfActOut.filter((x) => x !== c))}
+            C={C}
+          />
+        </div>
+        <select
+          className="rules-assist-control"
+          value={pickOutOn}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfActOut((prev) => (prev.includes(v) ? prev : [...prev, v]));
+            setPickOutOn("");
+          }}
+          style={{ width: "100%", minWidth: 200 }}
         >
-          <select
-            value={pickOutOff}
-            onChange={(e) => setPickOutOff(e.target.value)}
-            style={{
-              flex: 1,
-              minWidth: 200,
-              padding: 6,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-            }}
-          >
-            <option value="">Añadir OUT…</option>
-            {outs.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <Btn
-            small
-            onClick={() => {
-              if (pickOutOff && !wfDeactOut.includes(pickOutOff)) {
-                setWfDeactOut([...wfDeactOut, pickOutOff]);
-                setPickOutOff("");
-              }
-            }}
-            disabled={!pickOutOff}
-          >
-            Añadir
-          </Btn>
-        </div>
+          <option value="">Seleccionar OUT para activar…</option>
+          {outs.map((o) => (
+            <option key={o.code} value={o.code}>
+              {o.label}
+            </option>
+          ))}
+        </select>
       </div>
 
-      <Btn variant="primary" onClick={mergeToJson} disabled={!ins.length}>
-        Generar y fusionar en el JSON del editor
-      </Btn>
-      {!ins.length && (
-        <span style={{ marginLeft: 8, fontSize: 11, color: C.amber }}>
-          Define módulos e IN en «Definición módulos» para ver opciones.
-        </span>
-      )}
+      <div style={assistSection}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            paddingLeft: 10,
+            borderLeft: `3px solid ${C.red}`,
+          }}
+        >
+          <FontAwesomeIcon icon={faToggleOff} style={{ color: C.textSub, fontSize: 14 }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+            Desactivar salidas (OUT → OFF)
+          </span>
+        </div>
+        <div style={{ marginBottom: 10, minHeight: 28 }}>
+          <ChipList
+            items={wfDeactOut}
+            onRemove={(c) => setWfDeactOut(wfDeactOut.filter((x) => x !== c))}
+            C={C}
+          />
+        </div>
+        <select
+          className="rules-assist-control"
+          value={pickOutOff}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (!v) return;
+            setWfDeactOut((prev) => (prev.includes(v) ? prev : [...prev, v]));
+            setPickOutOff("");
+          }}
+          style={{ width: "100%", minWidth: 200 }}
+        >
+          <option value="">Seleccionar OUT para desactivar…</option>
+          {outs.map((o) => (
+            <option key={o.code} value={o.code}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        <Btn variant="primary" onClick={mergeToJson} disabled={!ins.length}>
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <FontAwesomeIcon icon={faCode} />
+            Generar y fusionar en el JSON del editor
+          </span>
+        </Btn>
+        {!ins.length && (
+          <span style={{ fontSize: 12, color: C.amber, fontWeight: 600 }}>
+            Define módulos e IN en «Definición módulos» para ver opciones.
+          </span>
+        )}
+      </div>
     </Card>
   );
 }

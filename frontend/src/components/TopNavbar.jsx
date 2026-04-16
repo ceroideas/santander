@@ -20,7 +20,7 @@ export function TopNavbar({
               key={tabName}
               type="button"
               onClick={() => onTabChange(idx)}
-              className="justify-between"
+              className="cursor-pointer justify-between"
             >
               {tabName}
               <div
