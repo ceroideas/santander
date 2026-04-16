@@ -13,7 +13,7 @@ const C = {
 
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
-const TABS = ["Panel", "Módulos I/O", "Histórico", "Configuración", "Definición módulos"];
+const TABS = ["Panel", "Placas I/O", "Histórico", "Configuración", "Definición placas"];
 const IN_PLACEHOLDERS = Array.from({ length: 12 }, (_, i) => `0x${(0x0080 + i).toString(16).toUpperCase().padStart(4, "0")}`);
 const OUT_PLACEHOLDERS = Array.from({ length: 12 }, (_, i) => `0x${(0x0000 + i).toString(16).toUpperCase().padStart(4, "0")}`);
 
@@ -78,13 +78,13 @@ function buildIoOptions(moduleList) {
       const zz = String(idx + 1).padStart(2, "0");
       const code = `IN_${yy}_${zz}`;
       const tag = ch.label ? `${ch.label} · ` : "";
-      ins.push({ code, label: `${mod.name || `Módulo ${mod.id}`} · ${tag}IN${idx + 1}` });
+      ins.push({ code, label: `${mod.name || `Placa ${mod.id}`} · ${tag}IN${idx + 1}` });
     });
     (mod.outputs || []).forEach((ch, idx) => {
       const zz = String(idx + 1).padStart(2, "0");
       const code = `OUT_${yy}_${zz}`;
       const tag = ch.label ? `${ch.label} · ` : "";
-      outs.push({ code, label: `${mod.name || `Módulo ${mod.id}`} · ${tag}OUT${idx + 1}` });
+      outs.push({ code, label: `${mod.name || `Placa ${mod.id}`} · ${tag}OUT${idx + 1}` });
     });
   }
   return { ins, outs };
@@ -122,8 +122,8 @@ function ChipList({ items, onRemove, C }) {
 
 function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, setRulesMap, addUI, setSelectedMode }) {
   const { ins, outs } = useMemo(() => buildIoOptions(moduleList), [moduleList]);
-  const [wfName, setWfName] = useState("Horario Automatico");
-  const [wfTrigger, setWfTrigger] = useState("IN_01_01");
+  const [wfName, setWfName] = useState("");
+  const [wfTrigger, setWfTrigger] = useState("");
   const [wfBlocked, setWfBlocked] = useState([]);
   const [wfDeactivate, setWfDeactivate] = useState([]);
   const [wfActOut, setWfActOut] = useState([]);
@@ -140,12 +140,21 @@ function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, set
   const slugPreview = useMemo(() => slugRuleKey(wfName), [wfName]);
 
   useEffect(() => {
-    if (ins.length && !ins.some((o) => o.code === wfTrigger)) {
+    if (!ins.length) return;
+    if (!wfTrigger || !ins.some((o) => o.code === wfTrigger)) {
       setWfTrigger(ins[0].code);
     }
   }, [ins, wfTrigger]);
 
   const mergeToJson = () => {
+    if (!wfName.trim()) {
+      addUI("ERR", "Indica un nombre para el modo (se usará para la clave JSON).");
+      return;
+    }
+    if (ins.length && !wfTrigger) {
+      addUI("ERR", "Elige un disparador IN.");
+      return;
+    }
     const key = slugPreview;
     const rule = {
       enabled: wfEnabled,
@@ -178,7 +187,7 @@ function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, set
       return;
     }
     setWfName(loadKey.replace(/_/g, " "));
-    setWfTrigger(typeof r.trigger === "string" ? r.trigger : ins[0]?.code || "IN_01_01");
+    setWfTrigger(typeof r.trigger === "string" ? r.trigger : ins[0]?.code || "");
     setWfBlocked(Array.isArray(r.blocked_if_active) ? [...r.blocked_if_active] : []);
     setWfDeactivate(Array.isArray(r.deactivate_modes) ? [...r.deactivate_modes] : []);
     setWfActOut(Array.isArray(r.activate_outputs) ? [...r.activate_outputs] : []);
@@ -193,9 +202,9 @@ function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, set
 
   return (
     <Card style={{ flex: "1 1 100%", marginBottom: 12 }}>
-      <SecLabel>Asistente: generar JSON de reglas (IN / OUT)</SecLabel>
+      <SecLabel>Crear modo (JSON de reglas)</SecLabel>
       <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
-        El nombre del script se convierte en clave JSON (ej. <strong>Horario Automático</strong> → <code>horario_automatico</code>). Los códigos siguen el mapa de módulos (IN_YY_ZZ / OUT_YY_ZZ).
+        Aquí defines <strong>modos</strong> (lógica). Las <strong>placas</strong> se configuran en «Definición placas». El nombre del modo se convierte en clave JSON (ej. <strong>Exclusa</strong> → <code>exclusa</code>). Los códigos IN/OUT siguen el mapa de tus placas (IN_YY_ZZ / OUT_YY_ZZ).
       </div>
       {ruleKeys.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 12 }}>
@@ -217,10 +226,11 @@ function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, set
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 11, color: C.muted }}>Nombre del script (título)</div>
-          <input value={wfName} onChange={(e) => setWfName(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+          <div style={{ fontSize: 11, color: C.muted }}>Nombre del modo</div>
+          <input value={wfName} onChange={(e) => setWfName(e.target.value)} placeholder="Ej. exclusa, horario cerrado…" style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} />
           <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
-            Clave JSON: <code style={{ color: C.textMid }}>{slugPreview}</code>
+            Clave JSON:{" "}
+            <code style={{ color: C.textMid }}>{wfName.trim() ? slugPreview : "— (nombre pendiente)"}</code>
           </div>
         </div>
         <div>
@@ -365,7 +375,7 @@ function RulesFormAssistant({ moduleList, rulesJson, setRulesJson, rulesMap, set
       <Btn variant="primary" onClick={mergeToJson} disabled={!ins.length}>
         Generar y fusionar en el JSON del editor
       </Btn>
-      {!ins.length && <span style={{ marginLeft: 8, fontSize: 11, color: C.amber }}>Define módulos e IN en «Definición módulos» para ver opciones.</span>}
+      {!ins.length && <span style={{ marginLeft: 8, fontSize: 11, color: C.amber }}>Define placas e IN en «Definición placas» para ver opciones.</span>}
     </Card>
   );
 }
@@ -396,7 +406,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       if (!Number.isNaN(rel)) body.relation_register = rel;
       else if (relation.trim() === "") body.relation_register = null;
       await apiFetch(`/modules/${mod.id}`, { method: "PUT", body: JSON.stringify(body) });
-      addUI("OK", `Módulo ${mod.id}: datos guardados`);
+      addUI("OK", `Placa ${mod.id}: datos guardados`);
       await onRefresh();
     } catch (e) {
       addUI("ERR", e.message);
@@ -464,10 +474,10 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
   };
 
   const delMod = async () => {
-    if (!window.confirm(`¿Eliminar módulo «${mod.name}» (id ${mod.id}) y todos sus canales?`)) return;
+    if (!window.confirm(`¿Eliminar placa «${mod.name}» (id ${mod.id}) y todos sus canales?`)) return;
     try {
       await apiFetch(`/modules/${mod.id}`, { method: "DELETE" });
-      addUI("WARN", `Módulo ${mod.id} eliminado`);
+      addUI("WARN", `Placa ${mod.id} eliminada`);
       await onRefresh();
     } catch (e) {
       addUI("ERR", e.message);
@@ -480,8 +490,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
   return (
     <Card style={{ flex: "1 1 480px", maxWidth: 560 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <SecLabel>Módulo #{mod.id}</SecLabel>
-        <Btn small variant="danger" onClick={delMod}>Eliminar módulo</Btn>
+        <SecLabel>Placa #{mod.id}</SecLabel>
+        <Btn small variant="danger" onClick={delMod}>Eliminar placa</Btn>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <div><div style={{ fontSize: 11, color: C.muted }}>Nombre</div><input value={name} onChange={(e) => setName(e.target.value)} style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
@@ -494,7 +504,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
         <div><div style={{ fontSize: 11, color: C.muted }}>Reg. relación IN/OUT (opc.)</div><input value={relation} onChange={(e) => setRelation(e.target.value)} placeholder="0xFA o vacío" style={{ width: "100%", padding: 6, border: `1px solid ${C.border}`, borderRadius: 6 }} /></div>
       </div>
       <div style={{ marginTop: 8 }}>
-        <Btn small variant="primary" onClick={saveMeta}>Guardar módulo (IP, nombre, …)</Btn>
+        <Btn small variant="primary" onClick={saveMeta}>Guardar placa (IP, nombre, …)</Btn>
       </div>
 
       <div style={{ marginTop: 14, fontSize: 11, fontWeight: 700, color: C.textMid }}>All ON / All OFF (holding register)</div>
@@ -572,6 +582,8 @@ export default function ETD8A12Panel() {
   const [selectedMode, setSelectedMode] = useState(null);
   const logEnd = useRef(null);
   const statusPollInFlightRef = useRef(false);
+  const rulesMapRef = useRef(rulesMap);
+  rulesMapRef.current = rulesMap;
 
   const orderedModuleIds = useMemo(() => {
     if (moduleList.length) {
@@ -590,7 +602,7 @@ export default function ETD8A12Panel() {
       const nOut = b?.outputs?.length ?? 0;
       return {
         id,
-        name: m?.name ?? `Módulo ${id}`,
+        name: m?.name ?? `Placa ${id}`,
         sub: m ? `${m.inputs?.length ?? nIn} IN / ${m.outputs?.length ?? nOut} OUT` : `${nIn} IN / ${nOut} OUT`,
       };
     },
@@ -631,7 +643,7 @@ export default function ETD8A12Panel() {
           }
         }
         setBoards((p) => ({ ...p, ...next }));
-        if (d.current_mode) {
+        if (d.current_mode && rulesMapRef.current[d.current_mode]) {
           setSelectedMode(d.current_mode);
         }
       } catch {
@@ -655,8 +667,7 @@ export default function ETD8A12Panel() {
           if (parsedLocal && typeof parsedLocal === "object") {
             setRulesMap(parsedLocal);
             setRulesJson(JSON.stringify(parsedLocal, null, 2));
-            const firstKeyLocal = Object.keys(parsedLocal)[0] || null;
-            setSelectedMode((prev) => prev || firstKeyLocal);
+            setSelectedMode((prev) => (prev && parsedLocal[prev] ? prev : null));
           }
         }
 
@@ -666,8 +677,7 @@ export default function ETD8A12Panel() {
         if (!localDraft) {
           setRulesMap(loadedRules);
           setRulesJson(JSON.stringify(loadedRules, null, 2));
-          const firstKey = Object.keys(loadedRules)[0] || null;
-          setSelectedMode((prev) => prev || firstKey);
+          setSelectedMode((prev) => (prev && loadedRules[prev] ? prev : null));
         }
       } catch (e) {
         addUI("ERR", `No se pudieron cargar reglas: ${e.message}`);
@@ -721,10 +731,10 @@ export default function ETD8A12Panel() {
       }));
       addUI(
         connectedNow ? "OK" : "WARN",
-        `Módulo ${id} ${connectedNow ? "conectado" : "no conectado"}`
+        `Placa ${id} ${connectedNow ? "conectada" : "no conectada"}`
       );
     } catch (e) {
-      addUI("ERR", `Módulo ${id}: ${e.message}`);
+      addUI("ERR", `Placa ${id}: ${e.message}`);
     } finally {
       setPending((p) => ({ ...p, [`c${id}`]: false }));
     }
@@ -735,7 +745,7 @@ export default function ETD8A12Panel() {
     try {
       setPending((p) => ({ ...p, [`${boardId}-${channel}`]: true }));
       await apiFetch(`/boards/${boardId}/output`, { method: "POST", body: JSON.stringify({ channel, state: !current }) });
-      addUI("OK", `M${boardId} OUT${channel} -> ${!current ? "ON" : "OFF"}`);
+      addUI("OK", `P${boardId} OUT${channel} -> ${!current ? "ON" : "OFF"}`);
     } catch (e) {
       addUI("ERR", e.message);
     } finally {
@@ -746,7 +756,7 @@ export default function ETD8A12Panel() {
   const doAllOn = async (id) => {
     try {
       await apiFetch(`/boards/${id}/outputs/all_on`, { method: "POST" });
-      addUI("OK", `Módulo ${id}: todas ON`);
+      addUI("OK", `Placa ${id}: todas ON`);
     } catch (e) {
       addUI("ERR", e.message);
     }
@@ -754,7 +764,7 @@ export default function ETD8A12Panel() {
   const doAllOff = async (id) => {
     try {
       await apiFetch(`/boards/${id}/outputs/all_off`, { method: "POST" });
-      addUI("WARN", `Módulo ${id}: todas OFF`);
+      addUI("WARN", `Placa ${id}: todas OFF`);
     } catch (e) {
       addUI("ERR", e.message);
     }
@@ -764,7 +774,7 @@ export default function ETD8A12Panel() {
       const d = await apiFetch("/modules");
       setModuleList(d.modules || []);
     } catch (e) {
-      addUI("ERR", `Módulos: ${e.message}`);
+      addUI("ERR", `Placas: ${e.message}`);
     }
   }, [addUI]);
 
@@ -789,7 +799,7 @@ export default function ETD8A12Panel() {
       });
       setDraftNewMod({ name: "", host: "", port: "", slave_id: "" });
       await refreshModuleList();
-      addUI("OK", "Módulo creado. Añade IN/OUT y all on/off en su tarjeta.");
+      addUI("OK", "Placa creada. Añade IN/OUT y all on/off en su tarjeta.");
     } catch (e) {
       addUI("ERR", e.message);
     }
@@ -806,7 +816,7 @@ export default function ETD8A12Panel() {
         ...(mod?.name ? { name: mod.name } : {}),
       };
       await apiFetch(`/boards/${id}/config`, { method: "PUT", body: JSON.stringify(body) });
-      addUI("OK", `Módulo ${id}: config aplicada`);
+      addUI("OK", `Placa ${id}: config aplicada`);
     } catch (e) {
       addUI("ERR", e.message);
     }
@@ -818,16 +828,16 @@ export default function ETD8A12Panel() {
     try {
       if (next === null) {
         await apiFetch(`/inputs/override?board_id=${boardId}&channel=${channel}`, { method: "DELETE" });
-        addUI("INFO", `Override IN${channel} en M${boardId}: REAL`);
+        addUI("INFO", `Override IN${channel} en P${boardId}: REAL`);
       } else {
         await apiFetch("/inputs/override", {
           method: "POST",
           body: JSON.stringify({ board_id: boardId, channel, state: next }),
         });
-        addUI("INFO", `Override IN${channel} en M${boardId}: ${next ? "FORZADA ON" : "FORZADA OFF"}`);
+        addUI("INFO", `Override IN${channel} en P${boardId}: ${next ? "FORZADA ON" : "FORZADA OFF"}`);
       }
     } catch (e) {
-      addUI("ERR", `No se pudo cambiar override IN${channel} M${boardId}: ${e.message}`);
+      addUI("ERR", `No se pudo cambiar override IN${channel} P${boardId}: ${e.message}`);
     }
   };
   const toModeLabel = (key) => key.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -845,10 +855,7 @@ export default function ETD8A12Panel() {
       const parsed = JSON.parse(rulesJson || "{}");
       await apiFetch("/rules", { method: "PUT", body: JSON.stringify({ rules: parsed }) });
       setRulesMap(parsed);
-      if (!selectedMode) {
-        const firstKey = Object.keys(parsed)[0] || null;
-        setSelectedMode(firstKey);
-      }
+      setSelectedMode((prev) => (prev && parsed[prev] ? prev : null));
       addUI("OK", "Reglas JSON guardadas");
     } catch (e) {
       addUI("ERR", `Error guardando reglas JSON: ${e.message}`);
@@ -922,7 +929,7 @@ export default function ETD8A12Panel() {
               </div>
             </Card>
             <Card>
-              <SecLabel>Estado de módulos</SecLabel>
+              <SecLabel>Estado de placas</SecLabel>
               {orderedModuleIds.map((mid) => {
                 const m = metaFor(mid);
                 const b = boards[mid] || { connected: false, inputs: [], inputs_raw: [], outputs: [], input_overrides: [] };
@@ -1088,9 +1095,9 @@ export default function ETD8A12Panel() {
             </div>
             <div style={{ maxHeight: 520, overflowY: "auto", border: `1px solid ${C.border}`, borderRadius: 8 }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead><tr><th style={{ textAlign: "left", padding: 8 }}>Hora</th><th style={{ textAlign: "left", padding: 8 }}>Tipo</th><th style={{ textAlign: "left", padding: 8 }}>Módulo</th><th style={{ textAlign: "left", padding: 8 }}>Descripción</th></tr></thead>
+                <thead><tr><th style={{ textAlign: "left", padding: 8 }}>Hora</th><th style={{ textAlign: "left", padding: 8 }}>Tipo</th><th style={{ textAlign: "left", padding: 8 }}>Placa</th><th style={{ textAlign: "left", padding: 8 }}>Descripción</th></tr></thead>
                 <tbody>
-                  {filtered.map((e, i) => <tr key={i}><td style={{ padding: 8, fontFamily: "monospace", color: C.muted }}>{e.ts}</td><td style={{ padding: 8 }}>{e.type}</td><td style={{ padding: 8 }}>{e.board ? `M${e.board}` : "-"}</td><td style={{ padding: 8 }}>{e.msg}</td></tr>)}
+                  {filtered.map((e, i) => <tr key={i}><td style={{ padding: 8, fontFamily: "monospace", color: C.muted }}>{e.ts}</td><td style={{ padding: 8 }}>{e.type}</td><td style={{ padding: 8 }}>{e.board ? `P${e.board}` : "-"}</td><td style={{ padding: 8 }}>{e.msg}</td></tr>)}
                 </tbody>
               </table>
             </div>
@@ -1131,7 +1138,7 @@ export default function ETD8A12Panel() {
             <Card style={{ flex: "2 1 620px" }}>
               <SecLabel>Editor JSON de reglas</SecLabel>
               <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                Define trigger, bloqueos, enclavamiento y salidas para modos como Horario Automático, Esclusa, Extendido.
+                Define trigger, bloqueos, enclavamiento y salidas para cada modo que crees (o edita el JSON a mano).
               </div>
               <textarea
                 value={rulesJson}
@@ -1158,11 +1165,11 @@ export default function ETD8A12Panel() {
         {tab === 4 && (
           <div>
             <Card style={{ marginBottom: 12 }}>
-              <SecLabel>Nuevo módulo</SecLabel>
+              <SecLabel>Nueva placa</SecLabel>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
                 <div>
                   <div style={{ fontSize: 11, color: C.muted }}>Nombre</div>
-                  <input value={draftNewMod.name} onChange={(e) => setDraftNewMod((p) => ({ ...p, name: e.target.value }))} style={{ padding: 6, width: 180, border: `1px solid ${C.border}`, borderRadius: 6 }} />
+                  <input value={draftNewMod.name} placeholder="Ej. Puerta calle" onChange={(e) => setDraftNewMod((p) => ({ ...p, name: e.target.value }))} style={{ padding: 6, width: 180, border: `1px solid ${C.border}`, borderRadius: 6 }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: C.muted }}>IP</div>
@@ -1176,11 +1183,11 @@ export default function ETD8A12Panel() {
                   <div style={{ fontSize: 11, color: C.muted }}>Slave</div>
                   <input type="number" value={draftNewMod.slave_id} placeholder="1" onChange={(e) => setDraftNewMod((p) => ({ ...p, slave_id: e.target.value }))} style={{ padding: 6, width: 72, border: `1px solid ${C.border}`, borderRadius: 6 }} />
                 </div>
-                <Btn variant="primary" onClick={createDraftModule}>Crear módulo</Btn>
+                <Btn variant="primary" onClick={createDraftModule}>Crear placa</Btn>
                 <Btn onClick={refreshModuleList}>Recargar lista</Btn>
               </div>
               <div style={{ fontSize: 11, color: C.muted, marginTop: 10 }}>
-                La configuración se guarda en SQLite. Códigos de reglas: IN_YY_ZZ y OUT_YY_ZZ (YY = id de módulo con dos dígitos, ZZ = índice de canal).
+                La configuración de placas se guarda en SQLite. En reglas JSON, IN_YY_ZZ / OUT_YY_ZZ usan YY = id de placa (dos dígitos) y ZZ = índice de canal.
               </div>
             </Card>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
