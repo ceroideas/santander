@@ -28,7 +28,7 @@
       "OUT_01_08"
     ]
   },
-  "horario_exclusa": {
+  "horario_esclusa": {
     "enabled": true,
     "auto_execute": true,
     "type": "enclavamiento",
