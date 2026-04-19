@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { clearPanelToken, getPanelToken } from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import {
@@ -175,10 +176,23 @@ const Btn = ({
 };
 
 async function apiFetch(path, opts = {}) {
+  const token = getPanelToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(opts.headers || {}),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers,
   });
+  if (res.status === 401) {
+    clearPanelToken();
+    window.location.assign("/login");
+    throw new Error("Sesión caducada o no autorizado");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Error");

@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, tablet_v1
+from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel
+from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -49,6 +50,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PanelApiAuthMiddleware)
 
 # Rutas bajo /api (ver API_SPEC.md)
 app.include_router(health.router, prefix=settings.api_prefix, tags=["Salud"])
@@ -57,6 +59,7 @@ app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
 app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
+app.include_router(auth_panel.router, prefix=settings.api_prefix)
 app.include_router(tablet_v1.router, prefix=settings.api_prefix)
 
 
