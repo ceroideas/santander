@@ -1758,6 +1758,34 @@ export default function ETD8A12Panel() {
     });
   };
 
+  const exportHistoryCsv = async () => {
+    try {
+      const token = getPanelToken();
+      const res = await fetch("/api/events/export", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        clearPanelToken();
+        window.location.assign("/login");
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `eventos_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addUI("OK", "CSV descargado");
+    } catch (e) {
+      addUI("ERR", `Exportar CSV: ${e.message}`);
+    }
+  };
+
   const filtered =
     histFilter === "ALL" ? events : events.filter((e) => e.type === histFilter);
   const totalModules = orderedModuleIds.length;
@@ -2636,7 +2664,10 @@ export default function ETD8A12Panel() {
                   {t}
                 </button>
               ))}
-              <div style={{ marginLeft: "auto" }}>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <Btn small variant="ghost" onClick={exportHistoryCsv}>
+                  Exportar CSV
+                </Btn>
                 <Btn small variant="danger" onClick={clearHistory}>
                   Borrar histórico
                 </Btn>
@@ -2656,6 +2687,8 @@ export default function ETD8A12Panel() {
                     <th style={{ textAlign: "left", padding: 8 }}>Hora</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Tipo</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Placa</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Usuario</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Origen</th>
                     <th style={{ textAlign: "left", padding: 8 }}>
                       Descripción
                     </th>
@@ -2663,7 +2696,7 @@ export default function ETD8A12Panel() {
                 </thead>
                 <tbody>
                   {filtered.map((e, i) => (
-                    <tr key={i}>
+                    <tr key={e.id ?? i}>
                       <td
                         style={{
                           padding: 8,
@@ -2676,6 +2709,12 @@ export default function ETD8A12Panel() {
                       <td style={{ padding: 8 }}>{e.type}</td>
                       <td style={{ padding: 8 }}>
                         {e.board ? `P${e.board}` : "-"}
+                      </td>
+                      <td style={{ padding: 8, fontSize: 12 }}>
+                        {e.actor_username || "—"}
+                      </td>
+                      <td style={{ padding: 8, fontSize: 11, color: C.textSub }}>
+                        {e.actor_principal || "—"}
                       </td>
                       <td style={{ padding: 8 }}>{e.msg}</td>
                     </tr>

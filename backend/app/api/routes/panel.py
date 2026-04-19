@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from app.db import panel_modules_store as pms
+from app.db import system_events_store as ses
 from app.db.session import get_connection
 from pydantic import BaseModel
 from pymodbus.client import ModbusTcpClient
@@ -89,7 +90,6 @@ def _sync_runtime_from_db() -> None:
         input_overrides[mid] = [
             (o_prev[i] if i < len(o_prev) and o_prev[i] in (None, True, False) else None) for i in range(n_in)
         ]
-event_log: List[dict] = []
 mode_latches: Dict[str, bool] = {}
 current_mode: Optional[str] = None
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
@@ -229,17 +229,12 @@ _load_persisted_panel_state()
 
 
 def add_event(level: str, message: str, board_id: int = 0) -> None:
-    event_log.append(
-        {
-            "ts": datetime.now().strftime("%H:%M:%S"),
-            "date": datetime.now().isoformat(),
-            "type": level,
-            "msg": message,
-            "board": board_id,
-        }
-    )
-    if len(event_log) > 1000:
-        event_log.pop(0)
+    """Registra evento en SQLite (actor desde contexto panel/tablet o system)."""
+    try:
+        ses.record_event(level, message, board_id=board_id)
+    except Exception:  # noqa: BLE001
+        # No bloquear operación crítica si falla el log
+        pass
 
 
 def get_client(board_id: int) -> ModbusTcpClient:
@@ -887,16 +882,19 @@ def read_outputs(board_id: int):
 
 @router.get("/events")
 def get_events(limit: int = 300, type_filter: Optional[str] = None):
-    filtered = event_log
-    if type_filter:
-        filtered = [e for e in filtered if e["type"] == type_filter.upper()]
-    return {"total": len(filtered), "events": list(reversed(filtered[-limit:]))}
+    sev = type_filter.strip().upper() if type_filter and type_filter.strip() else None
+    total, rows = ses.list_events(
+        severity_filter=sev,
+        limit=min(limit, 2000),
+        offset=0,
+    )
+    return {"total": total, "events": rows}
 
 
 @router.delete("/events")
 def clear_events():
-    event_log.clear()
-    return {"ok": True, "message": "Histórico limpiado"}
+    n = ses.clear_all_events()
+    return {"ok": True, "message": "Histórico limpiado", "deleted": n}
 
 
 @router.get("/inputs/override")

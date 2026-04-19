@@ -6,6 +6,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import settings
+from app.request_context import reset_actor, set_actor
 from app.services import panel_jwt
 
 
@@ -59,4 +60,8 @@ class PanelApiAuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         request.state.panel_username = username
-        return await call_next(request)
+        tok = set_actor("panel", username)
+        try:
+            return await call_next(request)
+        finally:
+            reset_actor(tok)

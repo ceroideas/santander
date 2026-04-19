@@ -1,7 +1,10 @@
 """GET /api/modes, POST /api/mode — modos operativos (7 modos, exclusión mutua)."""
 from datetime import datetime
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from app.db import system_events_store as ses
 
 router = APIRouter()
 
@@ -38,6 +41,14 @@ def set_mode(body: SetModeBody):
         raise HTTPException(status_code=400, detail="mode_id debe estar entre 1 y 7")
     prev_id = 1  # TODO: leer de estado
     name = next((m["name"] for m in MODES if m["id"] == body.mode_id), "?")
+    try:
+        ses.record_event(
+            "INFO",
+            f"Cambio modo operativo (API): id={body.mode_id} → {name} (anterior id={prev_id})",
+            event_type="mode_change",
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return {
         "mode_id": body.mode_id,
         "mode_name": name,

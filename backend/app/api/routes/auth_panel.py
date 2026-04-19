@@ -7,6 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.db import system_events_store as ses
 from app.db import system_users_store as sus
 from app.services import panel_jwt
 from app.services.tablet_password import hash_password, verify_password
@@ -53,7 +54,20 @@ def auth_register(
         raise HTTPException(status_code=409, detail="El usuario ya existe")
     h = hash_password(body.password)
     uid = sus.create_user(body.username, h)
-    return {"ok": True, "id": uid, "username": body.username.strip()}
+    uname = body.username.strip()
+    try:
+        ses.record_event(
+            "INFO",
+            f"Usuario panel registrado: {uname}",
+            event_type="auth_register",
+            source="auth",
+            actor_principal="system",
+            actor_username=None,
+            payload={"user_id": uid, "username": uname},
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return {"ok": True, "id": uid, "username": uname}
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -66,4 +80,15 @@ def auth_login(body: AuthBody) -> TokenResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
     tok = panel_jwt.create_access_token(row[1])
+    try:
+        ses.record_event(
+            "INFO",
+            f"Login panel: {row[1]}",
+            event_type="auth_login",
+            source="auth",
+            actor_principal="panel",
+            actor_username=row[1],
+        )
+    except Exception:  # noqa: BLE001
+        pass
     return TokenResponse(access_token=tok)
