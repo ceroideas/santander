@@ -2640,7 +2640,15 @@ export default function ETD8A12Panel() {
         )}
 
         {tab === 2 && (
-          <Card>
+          <Card
+            style={{
+              height: "calc(100vh - 170px)",
+              maxHeight: "calc(100vh - 170px)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
             <SecLabel>Histórico de eventos</SecLabel>
             <div
               style={{
@@ -2675,52 +2683,181 @@ export default function ETD8A12Panel() {
             </div>
             <div
               style={{
-                maxHeight: 520,
+                flex: 1,
+                minHeight: 0,
                 overflowY: "auto",
                 border: `1px solid ${C.border}`,
-                borderRadius: 8,
+                borderRadius: 12,
+                background: C.offWhite,
+                padding: 10,
               }}
             >
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", padding: 8 }}>Hora</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>Tipo</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>Placa</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>Usuario</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>Origen</th>
-                    <th style={{ textAlign: "left", padding: 8 }}>
-                      Descripción
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((e, i) => (
-                    <tr key={e.id ?? i}>
-                      <td
+              {filtered.length === 0 ? (
+                <div
+                  style={{
+                    padding: 18,
+                    borderRadius: 10,
+                    border: `1px dashed ${C.borderMid}`,
+                    background: C.white,
+                    color: C.textSub,
+                    fontSize: 13,
+                  }}
+                >
+                  No hay eventos para el filtro seleccionado.
+                </div>
+              ) : (
+                filtered.map((e, i) => {
+                  const styleByType = {
+                    INFO: {
+                      icon: faCircleInfo,
+                      iconColor: "#2563EB",
+                      badgeBg: "#DBEAFE",
+                      badgeColor: "#1D4ED8",
+                    },
+                    OK: {
+                      icon: faCircleCheck,
+                      iconColor: "#16A34A",
+                      badgeBg: "#DCFCE7",
+                      badgeColor: "#15803D",
+                    },
+                    WARN: {
+                      icon: faTriangleExclamation,
+                      iconColor: "#D97706",
+                      badgeBg: "#FEF3C7",
+                      badgeColor: "#B45309",
+                    },
+                    ERR: {
+                      icon: faCircleXmark,
+                      iconColor: "#DC2626",
+                      badgeBg: "#FEE2E2",
+                      badgeColor: "#B91C1C",
+                    },
+                  };
+                  const styleCfg = styleByType[e.type] || {
+                    icon: faPenToSquare,
+                    iconColor: C.textSub,
+                    badgeBg: C.surfaceAlt,
+                    badgeColor: C.textSub,
+                  };
+                  return (
+                    <div
+                      key={e.id ?? i}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "30px 1fr",
+                        columnGap: 10,
+                        paddingBottom: i === filtered.length - 1 ? 0 : 12,
+                      }}
+                    >
+                      <div
                         style={{
-                          padding: 8,
-                          fontFamily: "monospace",
-                          color: C.muted,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
                         }}
                       >
-                        {e.ts}
-                      </td>
-                      <td style={{ padding: 8 }}>{e.type}</td>
-                      <td style={{ padding: 8 }}>
-                        {e.board ? `P${e.board}` : "-"}
-                      </td>
-                      <td style={{ padding: 8, fontSize: 12 }}>
-                        {e.actor_username || "—"}
-                      </td>
-                      <td style={{ padding: 8, fontSize: 11, color: C.textSub }}>
-                        {e.actor_principal || "—"}
-                      </td>
-                      <td style={{ padding: 8 }}>{e.msg}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <span
+                          style={{
+                            width: 26,
+                            height: 26,
+                            borderRadius: "50%",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: styleCfg.badgeBg,
+                            color: styleCfg.iconColor,
+                          }}
+                        >
+                          <FontAwesomeIcon icon={styleCfg.icon} />
+                        </span>
+                        {i !== filtered.length - 1 && (
+                          <span
+                            style={{
+                              width: 2,
+                              flex: 1,
+                              minHeight: 20,
+                              marginTop: 4,
+                              background: C.border,
+                              borderRadius: 2,
+                            }}
+                          />
+                        )}
+                      </div>
+
+                      <div
+                        style={{
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: `1px solid ${C.border}`,
+                          background: C.white,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 14,
+                            fontWeight: 700,
+                            color: C.textMid,
+                            lineHeight: 1.25,
+                          }}
+                        >
+                          {e.msg}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 11,
+                            color: C.textSub,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span>{e.actor_username || "Sistema"}</span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              borderRadius: 999,
+                              padding: "1px 7px",
+                              background: C.surfaceAlt,
+                              color: C.textSub,
+                            }}
+                          >
+                            {e.actor_principal || "system"}
+                          </span>
+                          <span>{e.board ? `Placa ${e.board}` : "Sin placa"}</span>
+                        </div>
+                        <div
+                          style={{
+                            marginTop: 4,
+                            fontSize: 11,
+                            color: C.muted,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <span>{e.ts}</span>
+                          <span
+                            style={{
+                              fontSize: 10,
+                              fontWeight: 700,
+                              borderRadius: 999,
+                              padding: "1px 7px",
+                              background: styleCfg.badgeBg,
+                              color: styleCfg.badgeColor,
+                            }}
+                          >
+                            {e.type}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </Card>
         )}

@@ -19,6 +19,8 @@ def _is_public_api_path(path: str) -> bool:
     base = _api_base()
     if path == f"{base}/health":
         return True
+    if path == f"{base}/status":
+        return True
     if path.startswith(f"{base}/auth/"):
         return True
     if path.startswith(f"{base}/v1/"):
