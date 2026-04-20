@@ -2,6 +2,7 @@
 Aplicación principal FastAPI — Control de Accesos (Santander / SAIMA).
 Arranque: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,7 +14,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, tablet_v1
+from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel
+from app.db import system_events_store as ses
+from app.middleware.panel_api_auth import PanelApiAuthMiddleware
+from app.middleware.tablet_actor_context import TabletActorContextMiddleware
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -23,14 +27,36 @@ logging.basicConfig(
 log = logging.getLogger("control_accesos")
 
 
+async def _events_retention_loop() -> None:
+    while True:
+        await asyncio.sleep(6 * 3600)
+        try:
+            n = ses.purge_events_older_than()
+            if n:
+                log.info("Retención system_events: eliminadas %s filas", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("Purge system_events: %s", e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
-    # TODO: inicializar SQLite, cargar boards_config, arrancar tarea de polling Modbus
+    try:
+        ses.ensure_system_events_schema()
+        n0 = ses.purge_events_older_than()
+        if n0:
+            log.info("Retención system_events (arranque): eliminadas %s filas", n0)
+    except Exception as e:  # noqa: BLE001
+        log.warning("system_events al arranque: %s", e)
+    retention_task = asyncio.create_task(_events_retention_loop())
     yield
+    retention_task.cancel()
+    try:
+        await retention_task
+    except asyncio.CancelledError:
+        pass
     log.info("Cerrando servicio")
-    # TODO: cerrar conexiones Modbus, guardar estado
 
 
 app = FastAPI(
@@ -49,6 +75,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PanelApiAuthMiddleware)
+app.add_middleware(TabletActorContextMiddleware)
 
 # Rutas bajo /api (ver API_SPEC.md)
 app.include_router(health.router, prefix=settings.api_prefix, tags=["Salud"])
@@ -57,6 +85,7 @@ app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
 app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
+app.include_router(auth_panel.router, prefix=settings.api_prefix)
 app.include_router(tablet_v1.router, prefix=settings.api_prefix)
 
 

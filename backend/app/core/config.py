@@ -25,6 +25,13 @@ class Settings(BaseSettings):
     # Si tiene valor: todo registro requiere cabecera X-Tablet-Setup-Token coincidente.
     tablet_setup_token: Optional[str] = None
 
+    # Panel web / sistema (JWT distinto de tablet)
+    panel_jwt_secret: str = "cambiar-panel-jwt-en-produccion"
+    panel_jwt_expire_minutes: int = 10080  # 7 días
+    # Si está vacío: solo el primer usuario sin cabecera; más usuarios requieren PANEL_SETUP_TOKEN + X-Panel-Setup-Token.
+    # Si tiene valor: todo registro requiere cabecera coincidente.
+    panel_setup_token: Optional[str] = None
+
     # SQLite
     database_url: str = "sqlite:///./data/control_accesos.db"
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { clearPanelToken, getPanelToken } from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import {
@@ -175,10 +176,23 @@ const Btn = ({
 };
 
 async function apiFetch(path, opts = {}) {
+  const token = getPanelToken();
+  const headers = {
+    "Content-Type": "application/json",
+    ...(opts.headers || {}),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...opts,
+    headers,
   });
+  if (res.status === 401) {
+    clearPanelToken();
+    window.location.assign("/login");
+    throw new Error("Sesión caducada o no autorizado");
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || "Error");
@@ -982,7 +996,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
   const out = mod.outputs || [];
 
   return (
-    <Card style={{ flex: "1 1 480px", maxWidth: 560 }}>
+    <Card style={{ width: "100%", maxWidth: 560, margin: "0 auto" }}>
       <div
         style={{
           display: "flex",
@@ -1115,8 +1129,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr 1fr",
-          gap: 6,
+          gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+          gap: 8,
           marginTop: 6,
         }}
       >
@@ -1126,6 +1140,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
           value={bulkOnA}
           onChange={(e) => setBulkOnA(e.target.value)}
           style={{
+            width: "100%",
+            minWidth: 0,
             padding: 6,
             border: `1px solid ${C.border}`,
             borderRadius: 6,
@@ -1137,6 +1153,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
           value={bulkOnV}
           onChange={(e) => setBulkOnV(e.target.value)}
           style={{
+            width: "100%",
+            minWidth: 0,
             padding: 6,
             border: `1px solid ${C.border}`,
             borderRadius: 6,
@@ -1148,6 +1166,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
           value={bulkOffA}
           onChange={(e) => setBulkOffA(e.target.value)}
           style={{
+            width: "100%",
+            minWidth: 0,
             padding: 6,
             border: `1px solid ${C.border}`,
             borderRadius: 6,
@@ -1159,6 +1179,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
           value={bulkOffV}
           onChange={(e) => setBulkOffV(e.target.value)}
           style={{
+            width: "100%",
+            minWidth: 0,
             padding: 6,
             border: `1px solid ${C.border}`,
             borderRadius: 6,
@@ -1734,6 +1756,34 @@ export default function ETD8A12Panel() {
         addUI("ERR", `No se pudo borrar histórico: ${e.message}`);
       }
     });
+  };
+
+  const exportHistoryCsv = async () => {
+    try {
+      const token = getPanelToken();
+      const res = await fetch("/api/events/export", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        clearPanelToken();
+        window.location.assign("/login");
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || res.statusText);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `eventos_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addUI("OK", "CSV descargado");
+    } catch (e) {
+      addUI("ERR", `Exportar CSV: ${e.message}`);
+    }
   };
 
   const filtered =
@@ -2383,7 +2433,13 @@ export default function ETD8A12Panel() {
         )}
 
         {tab === 1 && (
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
+              gap: 12,
+            }}
+          >
             {orderedModuleIds.map((mid) => {
               const m = metaFor(mid);
               const b = boards[mid] || {
@@ -2391,43 +2447,174 @@ export default function ETD8A12Panel() {
                 inputs: [],
                 outputs: [],
               };
+              const outputsActive = (b.outputs || []).filter(Boolean).length;
+              const inputsActive = (b.inputs || []).filter(Boolean).length;
               return (
-                <Card key={mid} style={{ flex: "1 1 320px" }}>
-                  <SecLabel>{m.name}</SecLabel>
+                <Card
+                  key={mid}
+                  style={{
+                    border: `1px solid ${b.connected ? C.greenBorder : C.border}`,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                  }}
+                >
                   <div
-                    style={{ fontSize: 11, marginBottom: 8, color: C.muted }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <img
+                      src="/assets/santander-logo.png"
+                      alt="Santander"
+                      style={{ width: 18, height: 18, objectFit: "contain" }}
+                    />
+                    <strong style={{ fontSize: 15 }}>{m.name}</strong>
+                    <span
+                      style={{
+                        marginLeft: "auto",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        borderRadius: 999,
+                        padding: "2px 8px",
+                        background: b.connected ? "#DCFCE7" : "#FEE2E2",
+                        color: b.connected ? "#166534" : "#B91C1C",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 5,
+                      }}
+                    >
+                      <FontAwesomeIcon
+                        icon={b.connected ? faCircleCheck : faCircleXmark}
+                      />
+                      {b.connected ? "Conectada" : "Desconectada"}
+                    </span>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      marginBottom: 10,
+                      color: C.muted,
+                    }}
                   >
                     {m.sub}
                   </div>
-                  <div style={{ marginBottom: 8 }}>Salidas:</div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div
+                      style={{
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 8,
+                        padding: "7px 9px",
+                        background: C.white,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: C.muted,
+                          fontWeight: 700,
+                          marginBottom: 3,
+                        }}
+                      >
+                        Salidas activas
+                      </div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: C.red }}>
+                        {outputsActive}/{b.outputs?.length || 0}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 8,
+                        padding: "7px 9px",
+                        background: C.white,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: C.muted,
+                          fontWeight: 700,
+                          marginBottom: 3,
+                        }}
+                      >
+                        Entradas activas
+                      </div>
+                      <div
+                        style={{ fontSize: 14, fontWeight: 700, color: C.amber }}
+                      >
+                        {inputsActive}/{b.inputs?.length || 0}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      marginBottom: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: C.textMid,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faToggleOn} style={{ color: C.red }} />
+                    Salidas
+                  </div>
                   <div
                     style={{
                       display: "grid",
                       gridTemplateColumns: "repeat(6,1fr)",
                       gap: 6,
+                      marginBottom: 10,
                     }}
                   >
                     {(b.outputs || []).map((v, i) => (
-                      <button
+                      <div
                         key={i}
-                        onClick={() => doToggle(mid, i + 1, v)}
-                        disabled={!b.connected}
                         style={{
                           border: `1px solid ${v ? C.redBorder : C.border}`,
                           background: v ? C.redFaint : C.white,
                           borderRadius: 6,
-                          padding: 6,
+                          padding: "7px 0",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: v ? C.red : C.textSub,
+                          textAlign: "center",
                         }}
-                      >{`OUT${i + 1}`}</button>
+                      >{`OUT${i + 1}`}</div>
                     ))}
                   </div>
-                  <div style={{ marginTop: 10 }}>Entradas:</div>
+
+                  <div
+                    style={{
+                      marginBottom: 8,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: C.textMid,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faBolt} style={{ color: C.amber }} />
+                    Entradas
+                  </div>
                   <div
                     style={{
                       display: "grid",
                       gridTemplateColumns: "repeat(6,1fr)",
                       gap: 6,
-                      marginTop: 6,
                     }}
                   >
                     {(b.inputs || []).map((v, i) => (
@@ -2437,9 +2624,11 @@ export default function ETD8A12Panel() {
                           border: `1px solid ${v ? C.amberBorder : C.border}`,
                           background: v ? C.amberLight : C.white,
                           borderRadius: 6,
-                          padding: 6,
+                          padding: "7px 0",
                           textAlign: "center",
                           fontSize: 11,
+                          fontWeight: 700,
+                          color: v ? C.amber : C.textSub,
                         }}
                       >{`IN${i + 1}`}</div>
                     ))}
@@ -2475,7 +2664,10 @@ export default function ETD8A12Panel() {
                   {t}
                 </button>
               ))}
-              <div style={{ marginLeft: "auto" }}>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+                <Btn small variant="ghost" onClick={exportHistoryCsv}>
+                  Exportar CSV
+                </Btn>
                 <Btn small variant="danger" onClick={clearHistory}>
                   Borrar histórico
                 </Btn>
@@ -2495,6 +2687,8 @@ export default function ETD8A12Panel() {
                     <th style={{ textAlign: "left", padding: 8 }}>Hora</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Tipo</th>
                     <th style={{ textAlign: "left", padding: 8 }}>Placa</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Usuario</th>
+                    <th style={{ textAlign: "left", padding: 8 }}>Origen</th>
                     <th style={{ textAlign: "left", padding: 8 }}>
                       Descripción
                     </th>
@@ -2502,7 +2696,7 @@ export default function ETD8A12Panel() {
                 </thead>
                 <tbody>
                   {filtered.map((e, i) => (
-                    <tr key={i}>
+                    <tr key={e.id ?? i}>
                       <td
                         style={{
                           padding: 8,
@@ -2515,6 +2709,12 @@ export default function ETD8A12Panel() {
                       <td style={{ padding: 8 }}>{e.type}</td>
                       <td style={{ padding: 8 }}>
                         {e.board ? `P${e.board}` : "-"}
+                      </td>
+                      <td style={{ padding: 8, fontSize: 12 }}>
+                        {e.actor_username || "—"}
+                      </td>
+                      <td style={{ padding: 8, fontSize: 11, color: C.textSub }}>
+                        {e.actor_principal || "—"}
                       </td>
                       <td style={{ padding: 8 }}>{e.msg}</td>
                     </tr>
@@ -2656,13 +2856,13 @@ export default function ETD8A12Panel() {
               <SecLabel>Nueva placa</SecLabel>
               <div
                 style={{
-                  display: "flex",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                   gap: 8,
-                  flexWrap: "wrap",
-                  alignItems: "flex-end",
+                  alignItems: "end",
                 }}
               >
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: C.muted }}>Nombre</div>
                   <input
                     value={draftNewMod.name}
@@ -2672,13 +2872,13 @@ export default function ETD8A12Panel() {
                     }
                     style={{
                       padding: 6,
-                      width: 180,
+                      width: "100%",
                       border: `1px solid ${C.border}`,
                       borderRadius: 6,
                     }}
                   />
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: C.muted }}>IP</div>
                   <input
                     value={draftNewMod.host}
@@ -2688,13 +2888,13 @@ export default function ETD8A12Panel() {
                     }
                     style={{
                       padding: 6,
-                      width: 140,
+                      width: "100%",
                       border: `1px solid ${C.border}`,
                       borderRadius: 6,
                     }}
                   />
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: C.muted }}>Puerto</div>
                   <input
                     type="number"
@@ -2705,13 +2905,13 @@ export default function ETD8A12Panel() {
                     }
                     style={{
                       padding: 6,
-                      width: 88,
+                      width: "100%",
                       border: `1px solid ${C.border}`,
                       borderRadius: 6,
                     }}
                   />
                 </div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 11, color: C.muted }}>Slave</div>
                   <input
                     type="number"
@@ -2725,16 +2925,18 @@ export default function ETD8A12Panel() {
                     }
                     style={{
                       padding: 6,
-                      width: 72,
+                      width: "100%",
                       border: `1px solid ${C.border}`,
                       borderRadius: 6,
                     }}
                   />
                 </div>
-                <Btn variant="primary" onClick={createDraftModule}>
-                  Crear placa
-                </Btn>
-                <Btn onClick={refreshModuleList}>Recargar lista</Btn>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <Btn variant="primary" onClick={createDraftModule}>
+                    Crear placa
+                  </Btn>
+                  <Btn onClick={refreshModuleList}>Recargar lista</Btn>
+                </div>
               </div>
               <div style={{ fontSize: 11, color: C.muted, marginTop: 10 }}>
                 La configuración de placas se guarda en SQLite. En reglas JSON,
@@ -2742,7 +2944,15 @@ export default function ETD8A12Panel() {
                 índice de canal.
               </div>
             </Card>
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+                gap: 12,
+                alignItems: "start",
+                justifyItems: "center",
+              }}
+            >
               {moduleList.map((mod) => (
                 <ModuleDbEditor
                   key={moduleEditorKey(mod)}
