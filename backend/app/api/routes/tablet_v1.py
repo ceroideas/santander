@@ -143,6 +143,29 @@ def set_mode(
         rk = body.rule_key.strip()  # type: ignore[union-attr]
         if body.active:
             result = panel.api_v1_execute_rule_for_tablet(rk)
+            if not bool(result.get("executed", False)):
+                reason = str(result.get("reason") or "Regla bloqueada")
+                blocked_inputs = result.get("blocked_inputs") or []
+                try:
+                    ses.record_event(
+                        "WARN",
+                        f"No se pudo activar modo {rk}: {reason}",
+                        event_type="mode_set_blocked",
+                        source="tablet_v1",
+                        actor_principal="tablet",
+                        actor_username=_user,
+                        payload={"rule_key": rk, "reason": reason, "blocked_inputs": blocked_inputs},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "message": f"No se pudo activar el modo {rk}",
+                        "reason": reason,
+                        "blocked_inputs": blocked_inputs,
+                    },
+                )
             return {"ok": True, "action": "set_rule", "result": result}
         cleared = panel.api_v1_clear_current_mode_if_match(rk)
         return {"ok": True, "action": "set_rule", "active": False, **cleared}

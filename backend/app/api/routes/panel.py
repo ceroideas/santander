@@ -659,6 +659,23 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     if not rule.get("enabled", True):
         return {"executed": False, "reason": "Regla deshabilitada", "rule": rule_key}
 
+    # Incluso en ejecución forzada, respetar bloqueos por entradas activas.
+    # Se evalúa estado efectivo: override si existe, si no hardware real.
+    blocked_codes = rule.get("blocked_if_active", [])
+    blocked_active_codes = [
+        code
+        for code in blocked_codes
+        if _read_input_effective(code, use_hardware_if_no_override=True)
+    ]
+    if blocked_active_codes:
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        return {
+            "executed": False,
+            "rule": rule_key,
+            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "blocked_inputs": blocked_active_codes,
+        }
+
     trigger_code = rule.get("trigger")
     if trigger_code:
         b, ch = _parse_in_code(trigger_code)
