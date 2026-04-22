@@ -4,6 +4,32 @@ Este documento resume el comportamiento actual para operar y ajustar rapidamente
 
 ## 1) Comportamiento de conexion de placas
 
+### Transporte Modbus configurable: TCP o RS-485 (RTU)
+- El backend ahora soporta dos modos de transporte:
+  - `MODBUS_MODE=tcp` (comportamiento anterior)
+  - `MODBUS_MODE=rtu` (bus RS-485 compartido)
+- En `rtu`:
+  - Se usa un único puerto serial (`MODBUS_SERIAL_PORT`, por ejemplo `COM7`).
+  - Las 3 placas se diferencian por `slave_id` (1/2/3 en nuestro despliegue).
+  - `host/port` de cada módulo se conservan en BD por compatibilidad, pero no se usan para la conexión física.
+  - La desconexión manual de una placa cierra el bus RTU completo (mismo puerto compartido).
+
+### Variables de entorno para RS-485 (RTU)
+- `MODBUS_MODE=rtu`
+- `MODBUS_SERIAL_PORT=COM7`
+- `MODBUS_SERIAL_BAUDRATE=9600`
+- `MODBUS_SERIAL_BYTESIZE=8`
+- `MODBUS_SERIAL_PARITY=N`
+- `MODBUS_SERIAL_STOPBITS=1`
+- `MODBUS_TIMEOUT` (ya existente) también aplica a RTU.
+
+### Volver a TCP (rollback)
+- Para volver al comportamiento anterior por Ethernet/Modbus TCP:
+  1. Configurar `MODBUS_MODE=tcp`
+  2. Reiniciar el backend
+  3. Verificar que cada módulo tenga `host/port` correctos en `/api/panel/modules`
+- No requiere cambios de base de datos ni migraciones.
+
 ### `GET /api/panel/status`
 - Por defecto **NO** intenta autoevaluar reglas ni reconectar placas caidas.
 - Solo refresca I/O de placas que ya estan marcadas como `connected=true`.
@@ -24,6 +50,22 @@ Este documento resume el comportamiento actual para operar y ajustar rapidamente
 - Si quieres forzar conexion manual:
   - `POST /api/panel/boards/{board_id}/connect`
   - `POST /api/panel/boards/{board_id}/disconnect`
+
+### Diagnostico RS-485 (RTU)
+- Nuevo endpoint:
+  - `GET /api/panel/diagnostics/rtu-ping`
+- Uso:
+  - Sin parametros: prueba los `slave_id` definidos en BD.
+  - Con `slave_ids`: prueba una lista concreta (`?slave_ids=1,2,3`).
+  - Con `board_id`: usa el registro de probe del modulo indicado (`?board_id=2`).
+  - Con `retries`: cantidad de reintentos por slave (`?retries=3`, max 5).
+  - Con `timeout_s`: timeout por intento en segundos (`?timeout_s=1.5`, rango 0.2..5.0).
+- Ejemplos:
+  - `GET /api/panel/diagnostics/rtu-ping`
+  - `GET /api/panel/diagnostics/rtu-ping?slave_ids=1,2,3&retries=2&timeout_s=1.0`
+- Requisito:
+  - Solo funciona con `MODBUS_MODE=rtu`; si estas en TCP devuelve 400.
+  - Usa un cliente serial temporal de diagnostico para no quedar bloqueado por operaciones del bus principal.
 
 ## 2) API v1 (tablet/integraciones) con JWT
 

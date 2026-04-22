@@ -10,6 +10,7 @@ pydantic-settings>=2.0.0
 
 # Hardware Modbus (reutilizado del PoC)
 pymodbus>=3.5.0
+pyserial>=3.5
 
 # Seguridad / usuarios (API tablet v1)
 python-jose[cryptography]>=3.3.0

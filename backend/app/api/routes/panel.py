@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -10,8 +11,9 @@ from fastapi import APIRouter, HTTPException
 from app.db import panel_modules_store as pms
 from app.db import system_events_store as ses
 from app.db.session import get_connection
+from app.core.config import settings
 from pydantic import BaseModel
-from pymodbus.client import ModbusTcpClient
+from pymodbus.client import ModbusSerialClient, ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 router = APIRouter(prefix="/panel")
@@ -31,9 +33,11 @@ DISABLE_IN_OUT_RELATION_ON_CONNECT = False
 pms.ensure_panel_modules_schema()
 pms.seed_default_modules_if_empty()
 
-clients: Dict[int, Optional[ModbusTcpClient]] = {}
+clients: Dict[int, Optional[Any]] = {}
 io_state: Dict[int, dict] = {}
 input_overrides: Dict[int, List[Optional[bool]]] = {}
+serial_client: Optional[ModbusSerialClient] = None
+modbus_io_lock = threading.RLock()
 
 
 def _module_ids() -> List[int]:
@@ -49,6 +53,28 @@ def _board_cfg(board_id: int) -> dict:
 
 def _board_exists(board_id: int) -> bool:
     return board_id in pms.get_boards_config_map()
+
+
+def _modbus_mode() -> str:
+    mode = (settings.modbus_mode or "tcp").strip().lower()
+    return mode if mode in {"tcp", "rtu"} else "tcp"
+
+
+def _is_rtu_mode() -> bool:
+    return _modbus_mode() == "rtu"
+
+
+def _client_is_open(client: Any) -> bool:
+    if client is None:
+        return False
+    if hasattr(client, "is_socket_open"):
+        try:
+            return bool(client.is_socket_open())
+        except Exception:
+            return False
+    if hasattr(client, "connected"):
+        return bool(getattr(client, "connected"))
+    return True
 
 
 def _sync_runtime_from_db() -> None:
@@ -237,10 +263,10 @@ def add_event(level: str, message: str, board_id: int = 0) -> None:
         pass
 
 
-def get_client(board_id: int) -> ModbusTcpClient:
+def get_client(board_id: int) -> Any:
     _board_cfg(board_id)
     client = clients.get(board_id)
-    if client is None or not client.is_socket_open():
+    if not _client_is_open(client):
         raise HTTPException(status_code=503, detail=f"Módulo {board_id} no conectado")
     return client
 
@@ -255,61 +281,127 @@ def _probe_register_address(board_id: int) -> int:
 
 
 def _connect_board(board_id: int) -> bool:
+    global serial_client
     cfg = dict(_board_cfg(board_id))
     try:
-        if clients[board_id]:
-            try:
-                clients[board_id].close()
-            except Exception:
-                pass
-        candidates = [cfg["slave_id"]]
-        for candidate in (1, 255):
-            if candidate not in candidates:
-                candidates.append(candidate)
+        if _is_rtu_mode():
+            with modbus_io_lock:
+                if serial_client is None:
+                    serial_client = ModbusSerialClient(
+                        port=settings.modbus_serial_port,
+                        baudrate=settings.modbus_serial_baudrate,
+                        bytesize=settings.modbus_serial_bytesize,
+                        parity=settings.modbus_serial_parity,
+                        stopbits=settings.modbus_serial_stopbits,
+                        timeout=MODBUS_TIMEOUT,
+                    )
+                if not _client_is_open(serial_client):
+                    ok = serial_client.connect()
+                    if not ok:
+                        io_state[board_id]["connected"] = False
+                        io_state[board_id]["error"] = (
+                            f"No se pudo abrir puerto serial {settings.modbus_serial_port}"
+                        )
+                        add_event(
+                            "ERR",
+                            f"RTU no conectado en {settings.modbus_serial_port}",
+                            board_id,
+                        )
+                        return False
 
-        last_probe_error: Optional[str] = None
-        for candidate_slave in candidates:
-            client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], timeout=MODBUS_TIMEOUT)
-            ok = client.connect()
-            if not ok:
-                last_probe_error = "No se pudo establecer conexión TCP"
-                try:
-                    client.close()
-                except Exception:
-                    pass
-                continue
+                candidates = [cfg["slave_id"]]
+                for candidate in (1, 2, 3, 255):
+                    if candidate not in candidates:
+                        candidates.append(candidate)
 
-            clients[board_id] = client
-            io_state[board_id]["connected"] = True
-            io_state[board_id]["error"] = None
-            add_event("OK", f"TCP conectado a {cfg['host']}:{cfg['port']} (probando slave_id={candidate_slave})", board_id)
-
-            # Validación mínima Modbus
-            try:
-                probe_addr = _probe_register_address(board_id)
-                probe = client.read_holding_registers(address=probe_addr, count=1, device_id=candidate_slave)
-                if probe.isError():
-                    raise RuntimeError(f"Probe Modbus error: {probe}")
-                if cfg["slave_id"] != candidate_slave:
-                    pms.update_module(board_id, slave_id=candidate_slave)
-                    add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
-                    cfg = dict(_board_cfg(board_id))
-                break
-            except Exception as probe_err:  # noqa: BLE001
-                last_probe_error = str(probe_err)
-                io_state[board_id]["connected"] = False
-                io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {probe_err}"
-                try:
-                    client.close()
-                except Exception:
-                    pass
-                clients[board_id] = None
-                continue
+                last_probe_error: Optional[str] = None
+                for candidate_slave in candidates:
+                    try:
+                        probe_addr = _probe_register_address(board_id)
+                        probe = serial_client.read_holding_registers(
+                            address=probe_addr,
+                            count=1,
+                            device_id=candidate_slave,
+                        )
+                        if probe.isError():
+                            raise RuntimeError(f"Probe Modbus error: {probe}")
+                        if cfg["slave_id"] != candidate_slave:
+                            pms.update_module(board_id, slave_id=candidate_slave)
+                            add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
+                        clients[board_id] = serial_client
+                        io_state[board_id]["connected"] = True
+                        io_state[board_id]["error"] = None
+                        add_event(
+                            "OK",
+                            f"RTU conectado en {settings.modbus_serial_port} (slave_id={candidate_slave})",
+                            board_id,
+                        )
+                        break
+                    except Exception as probe_err:  # noqa: BLE001
+                        last_probe_error = str(probe_err)
+                else:
+                    io_state[board_id]["connected"] = False
+                    io_state[board_id]["error"] = f"RTU no operativo: {last_probe_error}"
+                    add_event(
+                        "ERR",
+                        f"Conexión RTU inválida tras probar slave_id {candidates}: {last_probe_error}",
+                        board_id,
+                    )
+                    return False
         else:
-            io_state[board_id]["connected"] = False
-            io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {last_probe_error}"
-            add_event("ERR", f"Conexión inválida tras probar slave_id {candidates}: {last_probe_error}", board_id)
-            return False
+            if clients[board_id]:
+                try:
+                    clients[board_id].close()
+                except Exception:
+                    pass
+            candidates = [cfg["slave_id"]]
+            for candidate in (1, 255):
+                if candidate not in candidates:
+                    candidates.append(candidate)
+
+            last_probe_error: Optional[str] = None
+            for candidate_slave in candidates:
+                client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], timeout=MODBUS_TIMEOUT)
+                ok = client.connect()
+                if not ok:
+                    last_probe_error = "No se pudo establecer conexión TCP"
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    continue
+
+                clients[board_id] = client
+                io_state[board_id]["connected"] = True
+                io_state[board_id]["error"] = None
+                add_event("OK", f"TCP conectado a {cfg['host']}:{cfg['port']} (probando slave_id={candidate_slave})", board_id)
+
+                # Validación mínima Modbus
+                try:
+                    probe_addr = _probe_register_address(board_id)
+                    probe = client.read_holding_registers(address=probe_addr, count=1, device_id=candidate_slave)
+                    if probe.isError():
+                        raise RuntimeError(f"Probe Modbus error: {probe}")
+                    if cfg["slave_id"] != candidate_slave:
+                        pms.update_module(board_id, slave_id=candidate_slave)
+                        add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
+                        cfg = dict(_board_cfg(board_id))
+                    break
+                except Exception as probe_err:  # noqa: BLE001
+                    last_probe_error = str(probe_err)
+                    io_state[board_id]["connected"] = False
+                    io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {probe_err}"
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    clients[board_id] = None
+                    continue
+            else:
+                io_state[board_id]["connected"] = False
+                io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {last_probe_error}"
+                add_event("ERR", f"Conexión inválida tras probar slave_id {candidates}: {last_probe_error}", board_id)
+                return False
 
         # Algunos ETD8A12 cierran socket si se escribe 0x00FA al conectar.
         # Se deja desactivado por defecto para priorizar estabilidad de enlace.
@@ -317,7 +409,9 @@ def _connect_board(board_id: int) -> bool:
             try:
                 rel = cfg.get("relation_register")
                 if rel is not None:
-                    client.write_register(address=int(rel), value=0x0000, device_id=cfg["slave_id"])
+                    c = clients.get(board_id)
+                    if c is not None:
+                        c.write_register(address=int(rel), value=0x0000, device_id=cfg["slave_id"])
             except Exception:
                 pass
         return True
@@ -330,7 +424,7 @@ def _connect_board(board_id: int) -> bool:
 
 def _read_all_io(board_id: int, retried: bool = False) -> None:
     client = clients.get(board_id)
-    if not client or not client.is_socket_open():
+    if not _client_is_open(client):
         if board_id in io_state:
             io_state[board_id]["connected"] = False
         return
@@ -339,15 +433,16 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
     slave = cfg["slave_id"]
     ins, outs = pms.get_channels_for_module(board_id)
     try:
-        for i, ch in enumerate(outs):
-            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-            if not res.isError() and res.registers:
-                io_state[board_id]["outputs"][i] = bool(res.registers[0])
+        with modbus_io_lock:
+            for i, ch in enumerate(outs):
+                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                if not res.isError() and res.registers:
+                    io_state[board_id]["outputs"][i] = bool(res.registers[0])
 
-        for i, ch in enumerate(ins):
-            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-            if not res.isError() and res.registers:
-                io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
+            for i, ch in enumerate(ins):
+                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                if not res.isError() and res.registers:
+                    io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
 
         effective_inputs: List[bool] = []
         for idx in range(len(ins)):
@@ -380,7 +475,8 @@ def _write_output(board_id: int, channel: int, state: bool) -> None:
     open_v = int(ch["open_cmd"]) if ch["open_cmd"] is not None else CMD_OPEN
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if state else close_v
-    result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
+    with modbus_io_lock:
+        result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en módulo {board_id}: {result}")
     io_state[board_id]["outputs"][channel - 1] = state
@@ -687,6 +783,25 @@ class BulkCommandsBody(BaseModel):
     all_off: Optional[BulkCommandPair] = None
 
 
+def _ensure_serial_client_connected() -> ModbusSerialClient:
+    """Abre (o reutiliza) el cliente serial para diagnósticos RTU."""
+    global serial_client
+    if serial_client is None:
+        serial_client = ModbusSerialClient(
+            port=settings.modbus_serial_port,
+            baudrate=settings.modbus_serial_baudrate,
+            bytesize=settings.modbus_serial_bytesize,
+            parity=settings.modbus_serial_parity,
+            stopbits=settings.modbus_serial_stopbits,
+            timeout=MODBUS_TIMEOUT,
+        )
+    if not _client_is_open(serial_client):
+        ok = serial_client.connect()
+        if not ok:
+            raise RuntimeError(f"No se pudo abrir puerto serial {settings.modbus_serial_port}")
+    return serial_client
+
+
 @router.get("/")
 def root():
     return {"service": "ETD8A12 Panel API", "status": "running", "timestamp": datetime.now().isoformat()}
@@ -709,6 +824,8 @@ def get_status(run_auto_rules: bool = False):
                     "host": cfg_map[bid]["host"],
                     "port": cfg_map[bid]["port"],
                     "slave_id": cfg_map[bid]["slave_id"],
+                    "modbus_mode": _modbus_mode(),
+                    "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
                 },
                 **io_state.get(bid, {}),
                 "input_overrides": input_overrides.get(bid, []),
@@ -734,16 +851,141 @@ def connect_board(board_id: int):
     return {"board_id": board_id, "connected": io_state[board_id]["connected"], "state": io_state[board_id]}
 
 
+@router.get("/diagnostics/rtu-ping")
+def rtu_ping(
+    board_id: Optional[int] = None,
+    slave_ids: str = "",
+    retries: int = 1,
+    timeout_s: float = 1.5,
+):
+    """
+    Diagnóstico de bus RS-485 / Modbus RTU.
+    - Si no se envía `slave_ids`, usa los slave_id configurados en BD.
+    - Si se envía `board_id`, usa el registro de probe de ese módulo.
+    - Si `MODBUS_MODE != rtu`, devuelve error 400.
+    """
+    if not _is_rtu_mode():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Diagnóstico RTU requiere MODBUS_MODE=rtu (actual: {_modbus_mode()})",
+        )
+
+    retries = max(1, min(retries, 5))
+    timeout_s = max(0.2, min(timeout_s, 5.0))
+    cfg_map = pms.get_boards_config_map()
+    mids = _module_ids()
+    if not mids:
+        raise HTTPException(status_code=400, detail="No hay módulos configurados")
+
+    # Si no indican módulo, se usa el primero para calcular dirección de probe.
+    probe_board_id = board_id if board_id is not None else mids[0]
+    if probe_board_id not in cfg_map:
+        raise HTTPException(status_code=404, detail=f"Módulo {probe_board_id} no existe")
+    probe_addr = _probe_register_address(probe_board_id)
+
+    if slave_ids.strip():
+        try:
+            candidates = [int(x.strip()) for x in slave_ids.split(",") if x.strip()]
+        except ValueError:
+            raise HTTPException(status_code=400, detail="slave_ids debe ser CSV numérico, ej: 1,2,3") from None
+    else:
+        candidates = []
+        for mid in mids:
+            sid = int(cfg_map[mid]["slave_id"])
+            if sid not in candidates:
+                candidates.append(sid)
+
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No hay slave_ids para probar")
+
+    report: List[Dict[str, Any]] = []
+    # Cliente temporal para diagnóstico: evita quedarse bloqueado por el cliente compartido.
+    client = ModbusSerialClient(
+        port=settings.modbus_serial_port,
+        baudrate=settings.modbus_serial_baudrate,
+        bytesize=settings.modbus_serial_bytesize,
+        parity=settings.modbus_serial_parity,
+        stopbits=settings.modbus_serial_stopbits,
+        timeout=timeout_s,
+    )
+    try:
+        if not client.connect():
+            raise HTTPException(
+                status_code=503,
+                detail=f"No se pudo abrir puerto serial {settings.modbus_serial_port}",
+            )
+
+        for sid in candidates:
+            ok = False
+            last_error: Optional[str] = None
+            for _ in range(retries):
+                try:
+                    resp = client.read_holding_registers(address=probe_addr, count=1, device_id=sid)
+                    if resp.isError():
+                        last_error = str(resp)
+                        continue
+                    ok = True
+                    last_error = None
+                    break
+                except Exception as e:  # noqa: BLE001
+                    last_error = str(e)
+
+            report.append(
+                {
+                    "slave_id": sid,
+                    "ok": ok,
+                    "probe_address": probe_addr,
+                    "error": last_error,
+                }
+            )
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+    return {
+        "modbus_mode": _modbus_mode(),
+        "serial": {
+            "port": settings.modbus_serial_port,
+            "baudrate": settings.modbus_serial_baudrate,
+            "bytesize": settings.modbus_serial_bytesize,
+            "parity": settings.modbus_serial_parity,
+            "stopbits": settings.modbus_serial_stopbits,
+            "timeout": timeout_s,
+        },
+        "probe_board_id": probe_board_id,
+        "probe_address": probe_addr,
+        "retries": retries,
+        "results": report,
+    }
+
+
 @router.post("/boards/{board_id}/disconnect")
 def disconnect_board(board_id: int):
+    global serial_client
     if not _board_exists(board_id):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
-    client = clients.get(board_id)
-    if client:
-        client.close()
-        clients[board_id] = None
-    io_state[board_id]["connected"] = False
-    add_event("WARN", "Desconectado manualmente", board_id)
+    if _is_rtu_mode():
+        with modbus_io_lock:
+            if serial_client:
+                try:
+                    serial_client.close()
+                except Exception:
+                    pass
+            serial_client = None
+            for mid in _module_ids():
+                clients[mid] = None
+                if mid in io_state:
+                    io_state[mid]["connected"] = False
+        add_event("WARN", "RTU desconectado manualmente (bus completo)", board_id)
+    else:
+        client = clients.get(board_id)
+        if client:
+            client.close()
+            clients[board_id] = None
+        io_state[board_id]["connected"] = False
+        add_event("WARN", "Desconectado manualmente", board_id)
     return {"board_id": board_id, "connected": False}
 
 
@@ -757,7 +999,17 @@ def update_board_config(board_id: int, config: BoardConfig):
         pms.update_module(board_id, host=config.host, port=config.port, slave_id=config.slave_id)
     cfg = _board_cfg(board_id)
     add_event("INFO", f"Config actualizada: {cfg['host']}:{cfg['port']} slave={cfg['slave_id']}", board_id)
-    return {"board_id": board_id, "config": {"name": cfg["name"], "host": cfg["host"], "port": cfg["port"], "slave_id": cfg["slave_id"]}}
+    return {
+        "board_id": board_id,
+        "config": {
+            "name": cfg["name"],
+            "host": cfg["host"],
+            "port": cfg["port"],
+            "slave_id": cfg["slave_id"],
+            "modbus_mode": _modbus_mode(),
+            "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
+        },
+    }
 
 
 @router.post("/boards/{board_id}/output")
@@ -773,7 +1025,8 @@ def set_output(board_id: int, action: ChannelAction):
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if action.state else close_v
     try:
-        result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
+        with modbus_io_lock:
+            result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
         if result.isError():
             raise HTTPException(status_code=502, detail=f"Error Modbus: {result}")
         io_state[board_id]["outputs"][action.channel - 1] = action.state
@@ -791,7 +1044,8 @@ def all_outputs_on(board_id: int):
     if "all_on" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_on configurado para este módulo")
     addr, val = bulk["all_on"]
-    result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
+    with modbus_io_lock:
+        result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
     n_out = len(io_state[board_id]["outputs"])
@@ -808,7 +1062,8 @@ def all_outputs_off(board_id: int):
     if "all_off" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_off configurado para este módulo")
     addr, val = bulk["all_off"]
-    result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
+    with modbus_io_lock:
+        result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
     n_out = len(io_state[board_id]["outputs"])
@@ -832,7 +1087,8 @@ def set_outputs_bitmask(board_id: int, action: BitmaskAction):
     bitmask = 0
     for ch in action.channels_on:
         bitmask |= 1 << (ch - 1)
-    result = client.write_register(address=int(bm_addr), value=bitmask, device_id=cfg["slave_id"])
+    with modbus_io_lock:
+        result = client.write_register(address=int(bm_addr), value=bitmask, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
     for i in range(n_out):
@@ -848,11 +1104,12 @@ def read_inputs(board_id: int):
     ins, _ = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values_raw: List[bool] = []
-    for ch in ins:
-        res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-        if res.isError() or not res.registers:
-            raise HTTPException(status_code=502, detail="Error leyendo entradas")
-        values_raw.append(bool(res.registers[0]))
+    with modbus_io_lock:
+        for ch in ins:
+            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+            if res.isError() or not res.registers:
+                raise HTTPException(status_code=502, detail="Error leyendo entradas")
+            values_raw.append(bool(res.registers[0]))
     io_state[board_id]["inputs_raw"] = values_raw
     values_effective = [values_raw[i] if input_overrides[board_id][i] is None else input_overrides[board_id][i] for i in range(len(values_raw))]
     io_state[board_id]["inputs"] = values_effective
@@ -871,11 +1128,12 @@ def read_outputs(board_id: int):
     _, outs = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values: List[bool] = []
-    for ch in outs:
-        res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-        if res.isError() or not res.registers:
-            raise HTTPException(status_code=502, detail="Error leyendo salidas")
-        values.append(bool(res.registers[0]))
+    with modbus_io_lock:
+        for ch in outs:
+            res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+            if res.isError() or not res.registers:
+                raise HTTPException(status_code=502, detail="Error leyendo salidas")
+            values.append(bool(res.registers[0]))
     io_state[board_id]["outputs"] = values
     return {"board_id": board_id, "outputs": {f"OUT{i+1}": values[i] for i in range(len(values))}}
 

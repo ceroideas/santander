@@ -37,8 +37,14 @@ class Settings(BaseSettings):
 
     # Modbus ETD8A12 (por defecto; se puede sobreescribir desde boards_config en BD)
     modbus_timeout: float = 3.0
+    modbus_mode: str = "rtu"  # tcp | rtu
     modbus_default_port: int = 5000
     modbus_default_slave_id: int = 1
+    modbus_serial_port: str = "COM7"
+    modbus_serial_baudrate: int = 9600
+    modbus_serial_bytesize: int = 8
+    modbus_serial_parity: str = "N"
+    modbus_serial_stopbits: int = 1
 
     # Persistencia estado (alcance: cada 60 s)
     state_save_interval_seconds: int = 60
