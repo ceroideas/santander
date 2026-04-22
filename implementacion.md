@@ -165,6 +165,17 @@ curl -X POST "http://localhost:8000/api/v1/set_mode" \
   -d "{\"action\":\"set_rule\",\"rule_key\":\"horario_automatico\",\"active\":true}"
 ```
 
+Si la regla queda bloqueada por `blocked_if_active`, devuelve `409` con razón explícita:
+```json
+{
+  "detail": {
+    "message": "No se pudo activar el modo horario_automatico",
+    "reason": "Bloqueado por entradas activas: IN_02_11",
+    "blocked_inputs": ["IN_02_11"]
+  }
+}
+```
+
 Desactivar modo (solo lo limpia si es el activo):
 ```bash
 curl -X POST "http://localhost:8000/api/v1/set_mode" \
