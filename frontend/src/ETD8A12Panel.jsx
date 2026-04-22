@@ -1700,11 +1700,16 @@ export default function ETD8A12Panel() {
   const runRuleByKey = async (ruleKey) => {
     await withGlobalLoader(async () => {
       try {
-        await apiFetch(`/rules/${encodeURIComponent(ruleKey)}/run`, {
+        const result = await apiFetch(`/rules/${encodeURIComponent(ruleKey)}/run`, {
           method: "POST",
         });
-        addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
-        setSelectedMode(ruleKey);
+        if (result?.executed) {
+          addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
+          setSelectedMode(ruleKey);
+          return;
+        }
+        const reason = result?.reason || "Regla bloqueada o no ejecutada";
+        addUI("WARN", `No se pudo ejecutar ${toModeLabel(ruleKey)}: ${reason}`);
       } catch (e) {
         addUI("ERR", `Error ejecutando modo ${ruleKey}: ${e.message}`);
       }
