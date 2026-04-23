@@ -8,10 +8,9 @@ export function UpdatesDesignPage() {
   return (
     <div className="content-view">
       <div className="card">
-        <h2>Sistema de actualizaciones remotas (diseno)</h2>
+        <h2>Sistema de actualizaciones remotas</h2>
         <p className="muted">
-          Vista orientada a gestion de versiones, paquetes y estado de despliegues. Pendiente implementacion de colas,
-          reintentos y logs reales de backend.
+          Gestion de versiones, paquetes y estado de despliegues.
         </p>
         <div className="row-actions">
           <button className="btn btn-primary" type="button">

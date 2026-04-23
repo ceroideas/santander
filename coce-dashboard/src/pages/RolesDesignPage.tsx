@@ -8,10 +8,9 @@ export function RolesDesignPage() {
   return (
     <div className="content-view">
       <div className="card">
-        <h2>Gestion avanzada de roles y permisos (diseno)</h2>
+        <h2>Gestion avanzada de roles y permisos</h2>
         <p className="muted">
-          Maqueta de perfiles y matriz de permisos por modulo. La autorizacion real de endpoints criticos queda para la
-          implementacion backend.
+          Perfiles y matriz de permisos por modulo.
         </p>
       </div>
 

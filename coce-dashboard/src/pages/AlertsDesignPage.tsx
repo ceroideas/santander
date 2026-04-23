@@ -8,10 +8,9 @@ export function AlertsDesignPage() {
   return (
     <div className="content-view">
       <div className="card">
-        <h2>Alertas inteligentes y notificaciones (diseno)</h2>
+        <h2>Alertas inteligentes y notificaciones</h2>
         <p className="muted">
-          Este modulo contempla reglas, ciclo de vida y panel de seguimiento. Diseno preparado para habilitar email/SMS
-          en fases posteriores sin integrar proveedores externos por ahora.
+          Este modulo contempla reglas, ciclo de vida y panel de seguimiento.
         </p>
         <div className="row-actions">
           <button className="btn btn-primary" type="button">

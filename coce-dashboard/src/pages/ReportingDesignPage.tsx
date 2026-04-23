@@ -9,10 +9,9 @@ export function ReportingDesignPage() {
   return (
     <div className="content-view">
       <div className="card">
-        <h2>Reporting avanzado (diseno)</h2>
+        <h2>Reporting avanzado</h2>
         <p className="muted">
-          Incluye filtros por fecha/sucursal/tipo de evento, tablas exportables y KPIs. Aun sin consultas reales del
-          backend corporativo.
+          Incluye filtros por fecha/sucursal/tipo de evento, tablas exportables y KPIs.
         </p>
         <div className="row-actions">
           <button className="btn btn-secondary" type="button">

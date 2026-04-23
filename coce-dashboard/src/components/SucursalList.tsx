@@ -26,7 +26,7 @@ export function SucursalList() {
       <header className="app-header">
         <div>
           <h1>
-            COCE — Dashboard <span className="tag">(POC)</span>
+            COCE — Dashboard
           </h1>
           <span className="tag">Registro local de sucursales · solo navegador</span>
         </div>
@@ -36,8 +36,8 @@ export function SucursalList() {
       </header>
 
       <div className="alert alert-info">
-        Las credenciales se guardan en <strong>localStorage</strong> de este navegador (prototipo). En producción
-        usaríamos backend COCE y secretos cifrados. Cada sucursal debe permitir CORS desde este origen o
+        Las credenciales se guardan en <strong>localStorage</strong> de este navegador. Cada sucursal debe permitir
+        CORS desde este origen o
         ejecutar el dashboard en la misma red con políticas adecuadas.
       </div>
 

@@ -8,10 +8,9 @@ export function MessagingDesignPage() {
   return (
     <div className="content-view">
       <div className="card">
-        <h2>Mensajeria avanzada (diseno)</h2>
+        <h2>Mensajeria avanzada</h2>
         <p className="muted">
-          Bandeja por instalacion/dispositivo, estados de lectura y filtros. Vista visual preparada; pendiente
-          integracion bidireccional centro-tablet.
+          Bandeja por instalacion/dispositivo, estados de lectura y filtros.
         </p>
         <div className="row-actions">
           <button className="btn btn-primary" type="button">

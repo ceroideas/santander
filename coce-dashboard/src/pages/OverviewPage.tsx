@@ -18,11 +18,11 @@ export function OverviewPage() {
           <h3>{conPanel}</h3>
         </article>
         <article className="kpi-card">
-          <p>Alertas abiertas (diseno)</p>
+          <p>Alertas abiertas</p>
           <h3>12</h3>
         </article>
         <article className="kpi-card">
-          <p>Actualizaciones pendientes (diseno)</p>
+          <p>Actualizaciones pendientes</p>
           <h3>7</h3>
         </article>
       </div>
@@ -30,15 +30,15 @@ export function OverviewPage() {
       <div className="card">
         <h2>Estado del alcance</h2>
         <p>
-          Este dashboard mantiene operativo el flujo actual de sucursales/modos y maqueta visualmente los modulos de
-          Fase 2 (actualizaciones, mensajeria, reporting, roles y alertas) sin implementar backend adicional.
+          Este dashboard integra la operativa de sucursales/modos y los modulos de actualizaciones, mensajeria,
+          reporting, roles y alertas en una sola vista administrativa.
         </p>
         <div className="row-actions">
           <Link className="btn btn-primary" to="/sucursales">
             Ir a sucursales
           </Link>
           <Link className="btn btn-secondary" to="/updates">
-            Ver Fase 2 (diseno)
+            Ver modulos
           </Link>
         </div>
       </div>

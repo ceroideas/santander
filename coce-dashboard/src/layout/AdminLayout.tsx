@@ -21,7 +21,7 @@ export function AdminLayout() {
           <div className="coce-brand-dot">C</div>
           <div>
             <strong>COCE Santander</strong>
-            <small>Dashboard Fase 2</small>
+            <small>Dashboard operativo</small>
           </div>
         </div>
         <nav className="coce-nav">
@@ -49,7 +49,7 @@ export function AdminLayout() {
             <p>Maquetacion tipo AdminLTE con funcionalidad actual preservada.</p>
           </div>
           <div className="topbar-badges">
-            <span className="badge badge-off">POC visual</span>
+            <span className="badge badge-off">Panel central</span>
             <span className="badge badge-ok">Activo</span>
           </div>
         </header>
