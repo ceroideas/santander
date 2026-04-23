@@ -26,7 +26,7 @@ export function SucursalForm() {
     if (!id) return;
     const found = loadSucursales().find((s) => s.id === id);
     if (!found) {
-      navigate('/', { replace: true });
+      navigate('/sucursales', { replace: true });
       return;
     }
     setForm({
@@ -59,17 +59,17 @@ export function SucursalForm() {
       return;
     }
     upsertSucursal(sucursal);
-    navigate('/');
+    navigate('/sucursales');
   }
 
   return (
-    <div className="app-shell">
+    <div className="content-view">
       <header className="app-header">
         <div>
           <h1>{isEdit ? 'Editar sucursal' : 'Nueva sucursal'}</h1>
           <span className="tag">Rutas API fijas: /api/v1/* (tableta) y /api/panel/* (panel)</span>
         </div>
-        <Link to="/" className="btn btn-ghost">
+        <Link to="/sucursales" className="btn btn-ghost">
           Volver
         </Link>
       </header>
@@ -168,7 +168,7 @@ export function SucursalForm() {
           <button type="submit" className="btn btn-primary">
             Guardar
           </button>
-          <Link to="/" className="btn btn-secondary">
+          <Link to="/sucursales" className="btn btn-secondary">
             Cancelar
           </Link>
         </div>

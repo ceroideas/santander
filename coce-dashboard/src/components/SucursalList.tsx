@@ -22,7 +22,7 @@ export function SucursalList() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="content-view">
       <header className="app-header">
         <div>
           <h1>
@@ -30,7 +30,7 @@ export function SucursalList() {
           </h1>
           <span className="tag">Registro local de sucursales · solo navegador</span>
         </div>
-        <Link to="/nueva" className="btn btn-primary">
+        <Link to="/sucursales/nueva" className="btn btn-primary">
           Añadir sucursal
         </Link>
       </header>
@@ -54,10 +54,10 @@ export function SucursalList() {
                 <div className="meta">{baseUrlFromSucursal(s)}</div>
               </div>
               <div className="row-actions" style={{ marginTop: 0 }}>
-                <Link to={`/sucursal/${s.id}`} className="btn btn-primary">
+                <Link to={`/control/${s.id}`} className="btn btn-primary">
                   Abrir dashboard
                 </Link>
-                <Link to={`/editar/${s.id}`} className="btn btn-secondary">
+                <Link to={`/sucursales/editar/${s.id}`} className="btn btn-secondary">
                   Editar
                 </Link>
                 <button type="button" className="btn btn-danger" onClick={() => onDelete(s.id, s.nombre)}>

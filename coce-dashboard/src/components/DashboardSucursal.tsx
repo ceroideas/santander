@@ -33,7 +33,7 @@ export function DashboardSucursal() {
     if (!id) return;
     const s = loadSucursales().find((x) => x.id === id);
     if (!s) {
-      navigate('/', { replace: true });
+      navigate('/sucursales', { replace: true });
       return;
     }
     setSucursal(s);
@@ -110,7 +110,7 @@ export function DashboardSucursal() {
 
   if (!sucursal) {
     return (
-      <div className="app-shell">
+      <div className="content-view">
         <p>Cargando…</p>
       </div>
     );
@@ -119,7 +119,7 @@ export function DashboardSucursal() {
   const base = baseUrlFromSucursal(sucursal);
 
   return (
-    <div className="app-shell">
+    <div className="content-view">
       <header className="app-header">
         <div>
           <h1>{sucursal.nombre}</h1>
@@ -129,10 +129,10 @@ export function DashboardSucursal() {
           <button type="button" className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Actualizando…' : 'Actualizar'}
           </button>
-          <Link to="/" className="btn btn-ghost">
+          <Link to="/sucursales" className="btn btn-ghost">
             Lista
           </Link>
-          <Link to={`/editar/${sucursal.id}`} className="btn btn-ghost">
+          <Link to={`/sucursales/editar/${sucursal.id}`} className="btn btn-ghost">
             Editar
           </Link>
         </div>
