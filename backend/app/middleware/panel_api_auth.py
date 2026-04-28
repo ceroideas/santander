@@ -27,6 +27,8 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path.startswith(f"{base}/v1/"):
         return True
+    if path.startswith(f"{base}/zaguan/"):
+        return True
     return False
 
 

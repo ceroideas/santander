@@ -142,6 +142,9 @@ def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
 
 rules_config: Dict[str, dict] = _load_rules_from_disk()
 rules_runtime: Dict[str, dict] = {}
+background_auto_rules_last_run_at: Optional[str] = None
+background_auto_rules_last_result: Dict[str, Any] = {}
+background_auto_rules_last_error: Optional[str] = None
 
 
 def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
@@ -504,16 +507,21 @@ def _parse_out_code(code: str) -> tuple[int, int]:
     raise HTTPException(status_code=400, detail=f"Código de salida inválido: {code}")
 
 
-def _read_input_effective(code: str, use_hardware_if_no_override: bool = True) -> bool:
+def _read_input_effective(
+    code: str,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+) -> bool:
     board_id, channel = _parse_in_code(code)
     if not _board_exists(board_id):
         raise HTTPException(status_code=400, detail=f"Módulo inválido en {code}")
     ins, _ = pms.get_channels_for_module(board_id)
     if not 1 <= channel <= len(ins):
         raise HTTPException(status_code=400, detail=f"Canal inválido en {code}")
-    forced = input_overrides[board_id][channel - 1]
-    if forced is not None:
-        return forced
+    if use_overrides:
+        forced = input_overrides[board_id][channel - 1]
+        if forced is not None:
+            return forced
     if not use_hardware_if_no_override:
         # En modo pruebas, si no hay override explícito, usar estado efectivo cacheado.
         return io_state[board_id]["inputs"][channel - 1]
@@ -529,6 +537,7 @@ def _evaluate_trigger_rule(
     rule_key: str,
     manual: bool = False,
     use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
     apply_outputs_to_hardware: bool = True,
 ) -> dict:
     global current_mode
@@ -543,12 +552,20 @@ def _evaluate_trigger_rule(
         return {"executed": False, "reason": "Regla deshabilitada"}
 
     trigger_code = rule.get("trigger", "IN_01_01")
-    trigger_active = _read_input_effective(trigger_code, use_hardware_if_no_override=use_hardware_if_no_override)
+    trigger_active = _read_input_effective(
+        trigger_code,
+        use_hardware_if_no_override=use_hardware_if_no_override,
+        use_overrides=use_overrides,
+    )
     blocked_codes = rule.get("blocked_if_active", [])
     blocked_active_codes = [
         code
         for code in blocked_codes
-        if _read_input_effective(code, use_hardware_if_no_override=use_hardware_if_no_override)
+        if _read_input_effective(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+        )
     ]
 
     if not manual:
@@ -643,6 +660,132 @@ def _evaluate_auto_rules() -> None:
             _evaluate_trigger_rule(rk, manual=False)
         except Exception as e:  # noqa: BLE001
             add_event("ERR", f"Error auto-evaluando {rk}: {e}", 1)
+
+
+def _deactivate_rule_on_fall(
+    rule_key: str,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = False,
+    apply_outputs_to_hardware: bool = True,
+) -> bool:
+    """Desactiva la regla actual si su trigger cayó (flanco de bajada)."""
+    global current_mode
+    rule = rules_config.get(rule_key)
+    if not rule:
+        return False
+    if rule.get("type") != "enclavamiento" or not rule.get("enabled", True):
+        return False
+    runtime = rules_runtime.setdefault(
+        rule_key, {"last_trigger_active": False, "last_executed_at": None}
+    )
+    trigger_code = rule.get("trigger")
+    if not isinstance(trigger_code, str) or not trigger_code:
+        return False
+    trigger_active = _read_input_effective(
+        trigger_code,
+        use_hardware_if_no_override=use_hardware_if_no_override,
+        use_overrides=use_overrides,
+    )
+    runtime["last_trigger_active"] = trigger_active
+    if trigger_active:
+        return False
+    if current_mode != rule_key:
+        return False
+
+    mode_latches[trigger_code] = False
+    current_mode = None
+    _persist_current_mode_to_db()
+
+    # Al desactivar por flanco OFF, soltamos las salidas que activó esta regla.
+    for out_code in rule.get("activate_outputs", []):
+        b, ch = _parse_out_code(out_code)
+        if apply_outputs_to_hardware:
+            if not io_state[b]["connected"]:
+                _connect_board(b)
+            if io_state[b]["connected"]:
+                _write_output(b, ch, False)
+        else:
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = False
+
+    add_event("INFO", f"Modo desactivado por trigger OFF: {rule_key}", 1)
+    return True
+
+
+def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
+    """
+    Ciclo autónomo de backend:
+    - refresca IO real de placas conectadas
+    - evalúa reglas automáticas con entrada real (sin override)
+    - opcional: desactiva regla activa al caer su trigger
+    """
+    global background_auto_rules_last_run_at
+    global background_auto_rules_last_result
+    global background_auto_rules_last_error
+    checked = 0
+    executed = 0
+    deactivated = 0
+    errors = 0
+    error_messages: List[str] = []
+    for board_id in _module_ids():
+        if board_id in io_state and io_state[board_id]["connected"]:
+            _read_all_io(board_id)
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True):
+            continue
+        if not rule.get("auto_execute", True):
+            continue
+        if rule.get("type") != "enclavamiento":
+            continue
+        checked += 1
+        try:
+            result = _evaluate_trigger_rule(
+                rk,
+                manual=False,
+                use_hardware_if_no_override=True,
+                use_overrides=False,
+                apply_outputs_to_hardware=True,
+            )
+            if result.get("executed"):
+                executed += 1
+            if deactivate_on_fall and _deactivate_rule_on_fall(
+                rk,
+                use_hardware_if_no_override=True,
+                use_overrides=False,
+                apply_outputs_to_hardware=True,
+            ):
+                deactivated += 1
+        except Exception as e:  # noqa: BLE001
+            errors += 1
+            error_messages.append(f"{rk}: {e}")
+            add_event("ERR", f"Error ciclo auto background {rk}: {e}", 1)
+    result = {
+        "checked_rules": checked,
+        "executed_rules": executed,
+        "deactivated_rules": deactivated,
+        "errors": errors,
+        "error_messages": error_messages[:10],
+        "timestamp": datetime.now().isoformat(),
+    }
+    background_auto_rules_last_run_at = result["timestamp"]
+    background_auto_rules_last_result = result
+    background_auto_rules_last_error = error_messages[0] if error_messages else None
+    return result
+
+
+@router.get("/auto-rules/background-state")
+def get_background_auto_rules_state():
+    return {
+        "enabled": bool(settings.auto_rules_background_enabled),
+        "interval_seconds": int(settings.auto_rules_background_interval_seconds),
+        "deactivate_on_fall": bool(settings.auto_rules_deactivate_on_fall),
+        "last_run_at": background_auto_rules_last_run_at,
+        "last_result": background_auto_rules_last_result,
+        "last_error": background_auto_rules_last_error,
+        "current_mode": current_mode,
+    }
 
 
 def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) -> dict:

@@ -52,10 +52,21 @@ class Settings(BaseSettings):
     # Retención histórico (alcance: 180 días)
     events_retention_days: int = 180
 
+    # Evaluación automática de reglas en background (independiente del dashboard)
+    auto_rules_background_enabled: bool = True
+    auto_rules_background_interval_seconds: int = 5
+    # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
+    auto_rules_deactivate_on_fall: bool = True
+
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)
     # Por defecto: carpeta hermana frontend/dist (repo con backend/ y frontend/).
     # Si en el servidor solo copias dist a backend/static, define STATIC_DIR=./static
     static_dir: Optional[str] = None
+
+    # Dispositivo ESP32 zaguán (cliente HTTP saliente backend -> ESP32)
+    zaguan_device_host: str = "192.168.10.20"
+    zaguan_device_port: int = 80
+    zaguan_device_timeout_s: float = 2.0
 
     class Config:
         env_file = ".env"

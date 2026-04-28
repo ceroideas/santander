@@ -265,3 +265,203 @@ Ejemplo:
 ```js
 const mode = await apiV1("/get_mode");
 ```
+
+## 6) Integración ESP32 zaguán (pulsadores y estado)
+
+Se integró el módulo `backend/zaguan_esp32.py` en `backend/app/main.py` con endpoints bajo `/api/zaguan`:
+
+- `GET /api/zaguan/estado`
+- `POST /api/zaguan/estado/p1..p4`
+- `POST /api/zaguan/pulsacion/p1`
+- `POST /api/zaguan/pulsacion/p2`
+- `POST /api/zaguan/pulsacion/p3`
+- `POST /api/zaguan/pulsacion/p4`
+
+Notas:
+- Estas rutas se exponen en `/api/zaguan/*` (como contrato principal).
+- Se mantiene compatibilidad adicional con `/zaguan/*`.
+- `GET /zaguan/estado` devuelve el estado en memoria de `p1..p4`.
+- `POST /zaguan/estado/{canal}` permite actualizar estado en backend con body
+  `{"estado":"libre|ocupado|abriendo|apagado"}`.
+- `POST /zaguan/pulsacion/*` acepta body con `canal` y `ts` y ejecuta callback si está registrado.
+- El backend registra en arranque un callback base (`_on_zaguan_pulsacion`) que guarda cada pulsación en `system_events`
+  con `event_type=zaguan_button_press`.
+- Además, el callback aplica un **mapeo fijo** de pulsador a salida ETD8A12 y ejecuta un pulso de apertura
+  (`ON` ~0.7 s + `OFF`):
+
+| Pulsador | Salida fija |
+|---|---|
+| `p1` | `OUT_02_01` |
+| `p2` | `OUT_03_01` |
+| `p3` | `OUT_02_01` |
+| `p4` | `OUT_03_01` |
+
+El mapeo se define en `backend/app/main.py`:
+- `ZAGUAN_PULSADOR_TO_OUT_CODE`
+- `ZAGUAN_PULSE_SECONDS`
+
+### 6.1 Pruebas rápidas (PowerShell)
+
+Desde Windows (backend levantado en `http://localhost:8000`):
+
+1) Consultar estado inicial:
+
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/estado"
+```
+
+Respuesta esperada (ejemplo):
+
+```json
+{ "p1": "apagado", "p2": "apagado", "p3": "apagado", "p4": "apagado" }
+```
+
+2) Simular pulsación canal 1:
+
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/pulsacion/p1" `
+  -ContentType "application/json" `
+  -Body '{"canal":1,"ts":1714123456789}'
+```
+
+Respuesta esperada:
+
+```json
+{ "ok": true, "canal": "p1" }
+```
+
+2b) Actualizar estado manual del canal p1:
+
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/estado/p1" `
+  -ContentType "application/json" `
+  -Body '{"estado":"abriendo"}'
+```
+
+Verificar:
+
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/estado"
+```
+
+3) Probar los 4 canales:
+
+```powershell
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/pulsacion/p2" -ContentType "application/json" -Body '{"canal":2,"ts":2}'
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/pulsacion/p3" -ContentType "application/json" -Body '{"canal":3,"ts":3}'
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/pulsacion/p4" -ContentType "application/json" -Body '{"canal":4,"ts":4}'
+```
+
+### 6.2 Pruebas rápidas (curl)
+
+```bash
+curl -X GET "http://localhost:8000/api/zaguan/estado"
+
+curl -X POST "http://localhost:8000/api/zaguan/pulsacion/p1" \
+  -H "Content-Type: application/json" \
+  -d "{\"canal\":1,\"ts\":1714123456789}"
+
+curl -X POST "http://localhost:8000/api/zaguan/estado/p1" \
+  -H "Content-Type: application/json" \
+  -d "{\"estado\":\"abriendo\"}"
+```
+
+### 6.3 Checklist de validación
+
+- El backend arranca sin errores de import.
+- `/api/zaguan/estado` responde 200.
+- `/api/zaguan/pulsacion/p{1-4}` responde 200 con body válido.
+- En logs aparece traza de pulsación recibida.
+
+### 6.4 Endpoints backend -> ESP32 (cliente saliente)
+
+El backend expone un proxy/control para llamar al dispositivo ESP32:
+
+- `GET /api/zaguan/device/ping` -> llama `GET http://<esp32>/api/ping`
+- `GET /api/zaguan/device/estado` -> llama `GET http://<esp32>/api/estado`
+- `GET /api/zaguan/device/config` -> llama `GET http://<esp32>/api/config`
+- `GET /api/zaguan/device/ota/version` -> llama `GET http://<esp32>/api/ota/version`
+- `POST /api/zaguan/device/canal/{p1..p4}/estado` -> llama `POST http://<esp32>/api/p{1..4}/estado`
+- `POST /api/zaguan/device/config/red` -> llama `POST http://<esp32>/api/config/red`
+- `POST /api/zaguan/device/config/canal` -> llama `POST http://<esp32>/api/config/canal`
+- `POST /api/zaguan/device/config/estado` -> llama `POST http://<esp32>/api/config/estado`
+- `POST /api/zaguan/device/config/flash` -> llama `POST http://<esp32>/api/config/flash`
+- `GET /api/zaguan/device/target` -> lee destino actual del cliente backend (`host`, `port`, `timeout_s`)
+- `POST /api/zaguan/device/target` -> actualiza destino del cliente backend (`host`, `port`, `timeout_s`)
+
+Variables de entorno para destino ESP32:
+- `ZAGUAN_DEVICE_HOST` (default `192.168.10.20`)
+- `ZAGUAN_DEVICE_PORT` (default `80`)
+- `ZAGUAN_DEVICE_TIMEOUT_S` (default `2.0`)
+
+Nota importante:
+- Si se usa `POST /api/zaguan/device/target`, el destino queda persistido en
+  `backend/data/zaguan_device_target.json` y ese valor tiene prioridad para las llamadas salientes.
+
+Ejemplos:
+
+```powershell
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/device/ping"
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/device/estado"
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/device/ota/version"
+Invoke-RestMethod -Method GET -Uri "http://localhost:8000/api/zaguan/device/target"
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/target" `
+  -ContentType "application/json" `
+  -Body '{"host":"192.168.10.20","port":80,"timeout_s":2.0}'
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/canal/p1/estado" `
+  -ContentType "application/json" `
+  -Body '{"estado":"libre"}'
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/config/red" `
+  -ContentType "application/json" `
+  -Body '{"ip":"192.168.10.20","gateway":"192.168.10.1","subnet":"255.255.255.0","backend_ip":"192.168.10.10","backend_puerto":8000,"backend_ruta":"/zaguan/estado","pulsacion_ruta":"/zaguan/pulsacion"}'
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/config/canal" `
+  -ContentType "application/json" `
+  -Body '{"canal":1,"leds":60,"brillo":150}'
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/config/estado" `
+  -ContentType "application/json" `
+  -Body '{"estado":"libre","canal":1,"color":[0,220,0],"animacion":"respiracion","velocidad":3000}'
+
+Invoke-RestMethod -Method POST -Uri "http://localhost:8000/api/zaguan/device/config/flash" `
+  -ContentType "application/json" `
+  -Body '{"color":[128,128,128],"n_flashes":3,"duracion_ms":120}'
+```
+
+## 7) Escucha continua de IN reales (sin depender del dashboard)
+
+Ahora el backend puede evaluar reglas automáticas en segundo plano cada 5 segundos
+sin necesidad de llamar `GET /api/panel/status` desde la UI.
+
+### Variables de entorno
+
+- `AUTO_RULES_BACKGROUND_ENABLED` (default `true`)
+- `AUTO_RULES_BACKGROUND_INTERVAL_SECONDS` (default `5`)
+- `AUTO_RULES_DEACTIVATE_ON_FALL` (default `true`)
+
+### Endpoint de estado del background
+
+- `GET /api/panel/auto-rules/background-state`
+
+Devuelve:
+- `enabled`, `interval_seconds`, `deactivate_on_fall`
+- `last_run_at`, `last_result`, `last_error`
+- `current_mode`
+
+### Comportamiento
+
+- El ciclo de background lee entradas/salidas de placas conectadas.
+- Evalúa reglas `enabled + auto_execute + type=enclavamiento`.
+- Usa **entrada real física** (`inputs_raw`) para trigger/bloqueos, sin tomar overrides.
+- Si `AUTO_RULES_DEACTIVATE_ON_FALL=true`:
+  - cuando el trigger del modo activo pasa de ON a OFF, el backend desactiva el modo
+    y apaga las salidas de `activate_outputs` de esa regla.
+
+### Importante sobre overrides
+
+- Los overrides siguen existiendo para pruebas/manual.
+- El ciclo automático en background está pensado para operación real y no usa override
+  para decidir trigger/bloqueos.
