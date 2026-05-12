@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from app.db import panel_modules_store as pms
 from app.db import system_events_store as ses
 from app.db.session import get_connection
@@ -28,8 +28,15 @@ REG_OUTPUT_START = 0x0000
 REG_OUTPUT_BITS = 0x0070
 REG_INPUT_START = 0x0080
 REG_IN_OUT_RELATION = 0x00FA
-MODBUS_TIMEOUT = 8
 DISABLE_IN_OUT_RELATION_ON_CONNECT = False
+
+
+def _pymodbus_client_kwargs() -> Dict[str, Any]:
+    """Timeout y reintentos desde .env (antes panel ignoraba modbus_timeout y usaba 8s + retries por defecto)."""
+    return {
+        "timeout": float(settings.modbus_timeout),
+        "retries": max(0, int(settings.modbus_retries)),
+    }
 
 pms.ensure_panel_modules_schema()
 pms.seed_default_modules_if_empty()
@@ -312,7 +319,7 @@ def _connect_board(board_id: int) -> bool:
                         bytesize=settings.modbus_serial_bytesize,
                         parity=settings.modbus_serial_parity,
                         stopbits=settings.modbus_serial_stopbits,
-                        timeout=MODBUS_TIMEOUT,
+                        **_pymodbus_client_kwargs(),
                     )
                 if not _client_is_open(serial_client):
                     ok = serial_client.connect()
@@ -395,7 +402,7 @@ def _connect_board(board_id: int) -> bool:
                 last_probe_error: Optional[str] = None
                 modbus_tcp_ready = False
                 for candidate_slave in candidates:
-                    client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], timeout=MODBUS_TIMEOUT)
+                    client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], **_pymodbus_client_kwargs())
                     ok = client.connect()
                     if not ok:
                         last_probe_error = "No se pudo establecer conexión TCP"
@@ -1009,7 +1016,7 @@ def _ensure_serial_client_connected() -> ModbusSerialClient:
             bytesize=settings.modbus_serial_bytesize,
             parity=settings.modbus_serial_parity,
             stopbits=settings.modbus_serial_stopbits,
-            timeout=MODBUS_TIMEOUT,
+            **_pymodbus_client_kwargs(),
         )
     if not _client_is_open(serial_client):
         ok = serial_client.connect()
@@ -1024,11 +1031,18 @@ def root():
 
 
 @router.get("/status")
-def get_status(run_auto_rules: bool = False):
+def get_status(
+    run_auto_rules: bool = False,
+    refresh_hardware: bool = Query(
+        True,
+        description="Si false, no hace lecturas Modbus (respuesta rápida; estado I/O puede estar desactualizado).",
+    ),
+):
     cfg_map = pms.get_boards_config_map()
-    for board_id in _module_ids():
-        if board_id in io_state and io_state[board_id]["connected"]:
-            _read_all_io(board_id)
+    if refresh_hardware:
+        for board_id in _module_ids():
+            if board_id in io_state and io_state[board_id]["connected"]:
+                _read_all_io(board_id)
     if run_auto_rules:
         _evaluate_auto_rules()
     return {

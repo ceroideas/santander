@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     # Modbus ETD8A12 (por defecto; se puede sobreescribir desde boards_config en BD)
     modbus_timeout: float = 3.0
+    # Reintentos pymodbus por petición; en remoto conviene 0–1 (cada read del status ya son muchas peticiones).
+    modbus_retries: int = 1
     modbus_mode: str = "tcp"  # tcp | rtu
     modbus_default_port: int = 502  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
     modbus_default_slave_id: int = 1
