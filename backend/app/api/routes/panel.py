@@ -488,6 +488,26 @@ def _connect_board(board_id: int) -> bool:
         return False
 
 
+def _read_holding_block_if_contiguous(client: Any, slave: int, channels: List[dict]) -> Optional[List[bool]]:
+    """
+    Una sola read_holding_registers si los addresses de `channels` (en orden actual)
+    son consecutivos. Caso típico ETD8A12: 12 OUT en 0x0000.. y 12 IN en 0x0080..
+    Devuelve lista de bool o None si no aplica / error Modbus.
+    """
+    if not channels:
+        return []
+    addrs = [int(ch["address"]) for ch in channels]
+    base = addrs[0]
+    for i, a in enumerate(addrs):
+        if a != base + i:
+            return None
+    n = len(addrs)
+    res = client.read_holding_registers(address=base, count=n, device_id=slave)
+    if res.isError() or not getattr(res, "registers", None) or len(res.registers) < n:
+        return None
+    return [bool(res.registers[i]) for i in range(n)]
+
+
 def _read_all_io(board_id: int, retried: bool = False) -> None:
     client = clients.get(board_id)
     if not _client_is_open(client):
@@ -500,15 +520,25 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
     ins, outs = pms.get_channels_for_module(board_id)
     try:
         with modbus_io_lock:
-            for i, ch in enumerate(outs):
-                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-                if not res.isError() and res.registers:
-                    io_state[board_id]["outputs"][i] = bool(res.registers[0])
+            out_batch = _read_holding_block_if_contiguous(client, slave, outs)
+            if out_batch is not None and len(out_batch) == len(outs):
+                for i, v in enumerate(out_batch):
+                    io_state[board_id]["outputs"][i] = v
+            else:
+                for i, ch in enumerate(outs):
+                    res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                    if not res.isError() and res.registers:
+                        io_state[board_id]["outputs"][i] = bool(res.registers[0])
 
-            for i, ch in enumerate(ins):
-                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-                if not res.isError() and res.registers:
-                    io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
+            in_batch = _read_holding_block_if_contiguous(client, slave, ins)
+            if in_batch is not None and len(in_batch) == len(ins):
+                for i, v in enumerate(in_batch):
+                    io_state[board_id]["inputs_raw"][i] = v
+            else:
+                for i, ch in enumerate(ins):
+                    res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                    if not res.isError() and res.registers:
+                        io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
 
         effective_inputs: List[bool] = []
         for idx in range(len(ins)):
