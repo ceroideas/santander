@@ -5,6 +5,7 @@ Ver .env.example en la raíz de backend/.
 from pathlib import Path
 from typing import Optional
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -15,7 +16,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     debug: bool = False
 
-    # API
+    # API (prefijo de todos los routers salvo zaguán, que usa rutas fijas /api/zaguan/...)
     api_prefix: str = "/api"
 
     # API tablet v1 (JWT)
@@ -37,8 +38,8 @@ class Settings(BaseSettings):
 
     # Modbus ETD8A12 (por defecto; se puede sobreescribir desde boards_config en BD)
     modbus_timeout: float = 3.0
-    modbus_mode: str = "rtu"  # tcp | rtu
-    modbus_default_port: int = 5000
+    modbus_mode: str = "tcp"  # tcp | rtu
+    modbus_default_port: int = 502  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
     modbus_default_slave_id: int = 1
     modbus_serial_port: str = "COM7"
     modbus_serial_baudrate: int = 9600
@@ -67,6 +68,18 @@ class Settings(BaseSettings):
     zaguan_device_host: str = "192.168.10.20"
     zaguan_device_port: int = 80
     zaguan_device_timeout_s: float = 2.0
+
+    @model_validator(mode="after")
+    def normalize_api_prefix(self) -> "Settings":
+        """Evita API_PREFIX vacío o con barras dobles que rompen el match con el proxy Vite (/api/...)."""
+        p = (self.api_prefix or "/api").strip()
+        if not p:
+            p = "/api"
+        if not p.startswith("/"):
+            p = "/" + p
+        p = p.rstrip("/") or "/api"
+        object.__setattr__(self, "api_prefix", p)
+        return self
 
     class Config:
         env_file = ".env"

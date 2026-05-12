@@ -25,7 +25,7 @@ def get_boards_config_placeholder():
         1: {
             "name": "ETD8A12 #1",
             "host": "192.168.1.101",
-            "port": 5000,
+            "port": 502,
             "slave_id": 1,
             "username": "admin",
             "password": "admin",
@@ -33,7 +33,7 @@ def get_boards_config_placeholder():
         2: {
             "name": "ETD8A12 #2",
             "host": "192.168.1.102",
-            "port": 5000,
+            "port": 502,
             "slave_id": 1,
             "username": "admin",
             "password": "admin",
@@ -41,7 +41,7 @@ def get_boards_config_placeholder():
         3: {
             "name": "ETD8A12 #3",
             "host": "192.168.1.103",
-            "port": 5000,
+            "port": 502,
             "slave_id": 1,
             "username": "admin",
             "password": "admin",

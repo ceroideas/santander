@@ -24,7 +24,7 @@ def ensure_panel_modules_schema() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 host TEXT NOT NULL,
-                port INTEGER NOT NULL DEFAULT 5000,
+                port INTEGER NOT NULL DEFAULT 502,
                 slave_id INTEGER NOT NULL DEFAULT 1,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 bitmask_address INTEGER,
@@ -168,7 +168,7 @@ def get_full_config_for_api() -> List[dict]:
     return out
 
 
-def create_module(name: str, host: str, port: int = 5000, slave_id: int = 1) -> int:
+def create_module(name: str, host: str, port: int = 502, slave_id: int = 1) -> int:
     ensure_panel_modules_schema()
     with get_connection() as conn:
         max_so = conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM panel_modules").fetchone()[0]
@@ -360,9 +360,9 @@ def seed_default_modules_if_empty() -> None:
         if n > 0:
             return
         defaults = [
-            ("Placa 1 — Central", "192.168.1.101", 5000, 1, 1),
-            ("Placa 2 — Puerta Calle", "192.168.1.102", 5000, 1, 2),
-            ("Placa 3 — Puerta Oficina", "192.168.1.103", 5000, 1, 3),
+            ("Placa 1 — Central", "192.168.1.101", 502, 1, 1),
+            ("Placa 2 — Puerta Calle", "192.168.1.102", 502, 1, 2),
+            ("Placa 3 — Puerta Oficina", "192.168.1.103", 502, 1, 3),
         ]
         for name, host, port, slave, so in defaults:
             cur = conn.execute(

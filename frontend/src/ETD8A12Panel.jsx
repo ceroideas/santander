@@ -1588,20 +1588,20 @@ export default function ETD8A12Panel() {
     }
   }, [rulesJson]);
 
-  useEffect(() => {
-    if (!serverOnline) return;
-    const pollEvents = async () => {
-      try {
-        const d = await apiFetch("/events?limit=300");
-        setEvents(d.events || []);
-      } catch {
-        // silent
-      }
-    };
-    pollEvents();
-    const iv = setInterval(pollEvents, 2000);
-    return () => clearInterval(iv);
-  }, [serverOnline]);
+  // useEffect(() => {
+  //   if (!serverOnline) return;
+  //   const pollEvents = async () => {
+  //     try {
+  //       const d = await apiFetch("/events?limit=300");
+  //       setEvents(d.events || []);
+  //     } catch {
+  //       // silent
+  //     }
+  //   };
+  //   pollEvents();
+  //   const iv = setInterval(pollEvents, 2000);
+  //   return () => clearInterval(iv);
+  // }, [serverOnline]);
 
   useEffect(() => {
     logEnd.current?.scrollIntoView({ behavior: "smooth" });
