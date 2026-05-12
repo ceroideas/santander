@@ -394,77 +394,59 @@ def _connect_board(board_id: int) -> bool:
                         clients[board_id].close()
                     except Exception:
                         pass
-                candidates = [cfg["slave_id"]]
-                for candidate in (1, 255):
-                    if candidate not in candidates:
-                        candidates.append(candidate)
+                # TCP: un destino IP = un dispositivo; no probar otros slave_id (1/255) porque
+                # podían responder y sobrescribir en BD el valor que el usuario acababa de guardar.
+                candidate_slave = int(cfg["slave_id"])
 
-                last_probe_error: Optional[str] = None
-                modbus_tcp_ready = False
-                for candidate_slave in candidates:
-                    client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], **_pymodbus_client_kwargs())
-                    ok = client.connect()
-                    if not ok:
-                        last_probe_error = "No se pudo establecer conexión TCP"
-                        try:
-                            client.close()
-                        except Exception:
-                            pass
-                        _tcp_connect_skip_until[board_id] = time.monotonic() + _TCP_OPEN_FAIL_BACKOFF_SEC
-                        break
-
-                    clients[board_id] = client
-                    io_state[board_id]["connected"] = True
-                    io_state[board_id]["error"] = None
-                    add_event(
-                        "OK",
-                        f"TCP conectado a {cfg['host']}:{cfg['port']} (probando slave_id={candidate_slave})",
-                        board_id,
-                    )
-
-                    # Validación mínima Modbus
+                client = ModbusTcpClient(host=cfg["host"], port=cfg["port"], **_pymodbus_client_kwargs())
+                ok = client.connect()
+                if not ok:
+                    last_probe_error = "No se pudo establecer conexión TCP"
                     try:
-                        probe_addr = _probe_register_address(board_id)
-                        probe = client.read_holding_registers(
-                            address=probe_addr, count=1, device_id=candidate_slave
-                        )
-                        if probe.isError():
-                            raise RuntimeError(f"Probe Modbus error: {probe}")
-                        if cfg["slave_id"] != candidate_slave:
-                            pms.update_module(board_id, slave_id=candidate_slave)
-                            add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
-                            cfg = dict(_board_cfg(board_id))
-                        modbus_tcp_ready = True
-                        break
-                    except Exception as probe_err:  # noqa: BLE001
-                        last_probe_error = str(probe_err)
-                        io_state[board_id]["connected"] = False
-                        io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {probe_err}"
-                        try:
-                            client.close()
-                        except Exception:
-                            pass
-                        clients[board_id] = None
-                        continue
-                else:
+                        client.close()
+                    except Exception:
+                        pass
+                    _tcp_connect_skip_until[board_id] = time.monotonic() + _TCP_OPEN_FAIL_BACKOFF_SEC
                     io_state[board_id]["connected"] = False
-                    io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {last_probe_error}"
+                    io_state[board_id]["error"] = last_probe_error
                     add_event(
                         "ERR",
-                        f"Conexión inválida tras probar slave_id {candidates}: {last_probe_error}",
+                        f"TCP {cfg['host']}:{cfg['port']}: {last_probe_error}",
+                        board_id,
+                    )
+                    return False
+
+                clients[board_id] = client
+                io_state[board_id]["connected"] = True
+                io_state[board_id]["error"] = None
+                add_event(
+                    "OK",
+                    f"TCP conectado a {cfg['host']}:{cfg['port']} (slave_id={candidate_slave})",
+                    board_id,
+                )
+
+                try:
+                    probe_addr = _probe_register_address(board_id)
+                    probe = client.read_holding_registers(
+                        address=probe_addr, count=1, device_id=candidate_slave
+                    )
+                    if probe.isError():
+                        raise RuntimeError(f"Probe Modbus error: {probe}")
+                except Exception as probe_err:  # noqa: BLE001
+                    last_probe_error = str(probe_err)
+                    io_state[board_id]["connected"] = False
+                    io_state[board_id]["error"] = f"TCP ok pero Modbus no operativo: {probe_err}"
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+                    clients[board_id] = None
+                    add_event(
+                        "ERR",
+                        f"TCP Modbus no operativo (slave_id={candidate_slave}): {last_probe_error}",
                         board_id,
                     )
                     _tcp_connect_skip_until[board_id] = time.monotonic() + _TCP_OPEN_FAIL_BACKOFF_SEC
-                    return False
-
-                if not modbus_tcp_ready:
-                    io_state[board_id]["connected"] = False
-                    io_state[board_id]["error"] = last_probe_error or "TCP no conectado"
-                    add_event(
-                        "ERR",
-                        f"TCP {cfg['host']}:{cfg['port']}: {last_probe_error or 'sin conexión'}",
-                        board_id,
-                    )
                     return False
 
                 _tcp_connect_skip_until.pop(board_id, None)

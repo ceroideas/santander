@@ -64,6 +64,11 @@ export const colors = {
 
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
+/** Unit ID Modbus 0-255; no usar `n || 1` (0 válido; NaN no debe volverse 1). */
+function normalizeSlaveId(raw, fallback = 1) {
+  const s = parseInt(String(raw).trim(), 10);
+  return Number.isFinite(s) && s >= 0 && s <= 255 ? s : fallback;
+}
 const TABS = [
   "Panel",
   "Placas I/O",
@@ -912,8 +917,11 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       const body = {
         name,
         host,
-        port: Number(port) || 5000,
-        slave_id: Number(slaveId) || 1,
+        port: (() => {
+          const p = parseInt(String(port).trim(), 10);
+          return Number.isFinite(p) && p > 0 ? p : 502;
+        })(),
+        slave_id: normalizeSlaveId(slaveId),
       };
       const bm = parseAddrStr(bitmask);
       if (!Number.isNaN(bm)) body.bitmask_address = bm;
@@ -1715,7 +1723,7 @@ export default function ETD8A12Panel() {
             name: draftNewMod.name.trim(),
             host: draftNewMod.host.trim(),
             port: Number(draftNewMod.port || 5000),
-            slave_id: Number(draftNewMod.slave_id || 1),
+            slave_id: normalizeSlaveId(draftNewMod.slave_id),
           }),
         });
         setDraftNewMod({ name: "", host: "", port: "", slave_id: "" });
@@ -1735,7 +1743,7 @@ export default function ETD8A12Panel() {
         const body = {
           host: bc.host ?? mod?.host ?? "",
           port: bc.port ?? mod?.port ?? 5000,
-          slave_id: bc.slave_id ?? mod?.slave_id ?? 1,
+          slave_id: normalizeSlaveId(bc.slave_id ?? mod?.slave_id ?? 1),
           ...(mod?.name ? { name: mod.name } : {}),
         };
         await apiFetch(`/boards/${id}/config`, {
@@ -3593,7 +3601,7 @@ export default function ETD8A12Panel() {
                           [mid]: {
                             host: p[mid]?.host ?? host,
                             port: p[mid]?.port ?? port,
-                            slave_id: Number(e.target.value || 1),
+                            slave_id: normalizeSlaveId(e.target.value),
                           },
                         }))
                       }
