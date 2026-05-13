@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     # Reintentos pymodbus por petición; en remoto conviene 0–1 (cada read del status ya son muchas peticiones).
     modbus_retries: int = 1
     modbus_mode: str = "tcp"  # tcp | rtu
-    modbus_default_port: int = 502  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
+    modbus_default_port: int = 5000  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
     modbus_default_slave_id: int = 1
     modbus_serial_port: str = "COM7"
     modbus_serial_baudrate: int = 9600
