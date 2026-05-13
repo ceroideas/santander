@@ -31,8 +31,8 @@ env/
 *.swo
 
 # Base de datos local / datos de desarrollo (ajusta si necesitas versionar algo en data/)
-backend/data/*.db
-backend/data/*.db-journal
+# backend/data/*.db
+# backend/data/*.db-journal
 
 # Logs y cobertura
 *.log

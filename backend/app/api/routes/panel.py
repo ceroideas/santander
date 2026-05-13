@@ -1081,8 +1081,8 @@ def get_status(
 
 @router.post("/boards/{board_id}/connect")
 def connect_board(board_id: int):
-    if board_id not in range(1, 4):
-        raise HTTPException(status_code=404, detail="board_id debe ser 1, 2 o 3")
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
     ok = _connect_board(board_id)
     if ok:
         _read_all_io(board_id)
