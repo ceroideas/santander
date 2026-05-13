@@ -4,9 +4,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_01",
-    "blocked_if_active": [
-      "IN_01_10"
-    ],
+    "blocked_if_active": ["IN_01_10"],
     "deactivate_modes": [
       "IN_01_02",
       "IN_01_03",
@@ -16,12 +14,7 @@
       "IN_01_07",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_02_06",
-      "OUT_02_05",
-      "OUT_03_05",
-      "OUT_03_06"
-    ],
+    "activate_outputs": ["OUT_02_06", "OUT_02_05", "OUT_03_05", "OUT_03_06"],
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02",
@@ -62,9 +55,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_02",
-    "blocked_if_active": [
-      "IN_01_10"
-    ],
+    "blocked_if_active": ["IN_01_10"],
     "deactivate_modes": [
       "IN_01_01",
       "IN_01_03",
@@ -74,12 +65,7 @@
       "IN_01_07",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_02_06",
-      "OUT_02_05",
-      "OUT_03_05",
-      "OUT_03_06"
-    ],
+    "activate_outputs": ["OUT_02_06", "OUT_02_05", "OUT_03_05", "OUT_03_06"],
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02",
@@ -179,9 +165,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_04",
-    "blocked_if_active": [
-      "IN_03_04"
-    ],
+    "blocked_if_active": ["IN_03_04"],
     "deactivate_modes": [
       "IN_01_01",
       "IN_01_02",
@@ -195,10 +179,7 @@
       "IN_03_06",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_03_01",
-      "OUT_03_02"
-    ],
+    "activate_outputs": ["OUT_03_01", "OUT_03_02"],
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02",
@@ -241,10 +222,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_05",
-    "blocked_if_active": [
-      "IN_03_04",
-      "IN_02_04"
-    ],
+    "blocked_if_active": ["IN_03_04", "IN_02_04"],
     "deactivate_modes": [
       "IN_01_01",
       "IN_01_02",
@@ -258,12 +236,7 @@
       "IN_03_06",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_03_01",
-      "OUT_03_02",
-      "OUT_02_01",
-      "OUT_02_02"
-    ],
+    "activate_outputs": ["OUT_03_01", "OUT_03_02", "OUT_02_01", "OUT_02_02"],
     "deactivate_outputs": [
       "OUT_02_03",
       "OUT_02_04",
@@ -304,9 +277,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_06",
-    "blocked_if_active": [
-      "IN_02_04"
-    ],
+    "blocked_if_active": ["IN_02_04"],
     "deactivate_modes": [
       "IN_01_01",
       "IN_01_02",
@@ -320,11 +291,7 @@
       "IN_03_06",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_02_01",
-      "OUT_02_02",
-      "OUT_03_04"
-    ],
+    "activate_outputs": ["OUT_02_01", "OUT_02_02", "OUT_03_04"],
     "deactivate_outputs": [
       "OUT_02_03",
       "OUT_02_04",
@@ -366,10 +333,7 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_07",
-    "blocked_if_active": [
-      "IN_02_11",
-      "IN_03_11"
-    ],
+    "blocked_if_active": ["IN_02_11", "IN_03_11"],
     "deactivate_modes": [
       "IN_01_01",
       "IN_01_02",
@@ -384,12 +348,7 @@
       "IN_03_06",
       "IN_01_09"
     ],
-    "activate_outputs": [
-      "OUT_02_01",
-      "OUT_03_01",
-      "OUT_02_02",
-      "OUT_03_02"
-    ],
+    "activate_outputs": ["OUT_02_01", "OUT_03_01", "OUT_02_02", "OUT_03_02"],
     "deactivate_outputs": [
       "OUT_02_03",
       "OUT_02_04",
@@ -430,22 +389,149 @@
     "auto_execute": true,
     "type": "enclavamiento",
     "trigger": "IN_01_09",
+    "blocked_if_active": ["IN_01_03", "IN_01_04", "IN_01_05", "IN_01_06"],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_02_03", "OUT_03_03"],
+    "deactivate_outputs": ["OUT_02_01", "OUT_02_02", "OUT_03_01", "OUT_03_02"]
+  },
+  "radares_interior_puerta_oficina": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_03_01",
     "blocked_if_active": [
+      "IN_01_02",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
-      "IN_01_06"
+      "IN_01_06",
+      "IN_01_07"
     ],
     "deactivate_modes": [],
-    "activate_outputs": [
-      "OUT_02_03",
-      "OUT_03_03"
+    "activate_outputs": ["OUT_03_07"],
+    "deactivate_outputs": []
+  },
+  "radares_exterior_puerta_oficina": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_03_02",
+    "blocked_if_active": [
+      "IN_01_02",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
     ],
-    "deactivate_outputs": [
-      "OUT_02_01",
-      "OUT_02_02",
-      "OUT_03_01",
-      "OUT_03_02"
-    ]
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_03_07"],
+    "deactivate_outputs": []
+  },
+  "radares_interior_puerta_calle": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_02_01",
+    "blocked_if_active": [
+      "IN_01_02",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_02_07"],
+    "deactivate_outputs": []
+  },
+  "radares_exterior_puerta_calle": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_02_02",
+    "blocked_if_active": [
+      "IN_01_02",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_02_07"],
+    "deactivate_outputs": []
+  },
+  "radares_interior_puerta_oficina_esclusa": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_03_01",
+    "blocked_if_active": [
+      "OUT_02_04",
+      "IN_01_01",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_03_07"],
+    "deactivate_outputs": []
+  },
+  "radares_exterior_puerta_oficina_esclusa": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_03_02",
+    "blocked_if_active": [
+      "OUT_02_04",
+      "IN_01_01",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_03_07"],
+    "deactivate_outputs": []
+  },
+  "radares_interior_puerta_calle_esclusa": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_02_01",
+    "blocked_if_active": [
+      "OUT_03_04",
+      "IN_01_01",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_02_07"],
+    "deactivate_outputs": []
+  },
+  "radares_exterior_puerta_calle_esclusa": {
+    "enabled": true,
+    "auto_execute": true,
+    "type": "pulso_5_sg",
+    "trigger": "IN_02_02",
+    "blocked_if_active": [
+      "OUT_03_04",
+      "IN_01_01",
+      "IN_01_03",
+      "IN_01_04",
+      "IN_01_05",
+      "IN_01_06",
+      "IN_01_07"
+    ],
+    "deactivate_modes": [],
+    "activate_outputs": ["OUT_02_07"],
+    "deactivate_outputs": []
   }
 }

@@ -683,6 +683,7 @@ function RulesFormAssistant({
           >
             <option value="enclavamiento">enclavamiento</option>
             <option value="manual">manual</option>
+            <option value="pulso_5_sg">pulso 5 sg</option>
           </select>
         </div>
       </div>
