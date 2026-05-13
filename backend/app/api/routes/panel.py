@@ -336,43 +336,38 @@ def _connect_board(board_id: int) -> bool:
                         )
                         return False
 
-                candidates = [cfg["slave_id"]]
-                for candidate in (1, 2, 3, 255):
-                    if candidate not in candidates:
-                        candidates.append(candidate)
-
+                # Mismo criterio que TCP: no barrer 1/2/3/255 ni persistir un slave distinto al
+                # configurado (en RS-485 suele haber varios nodos; el primero que responda podía
+                # machacar en BD el slave de otra placa o un valor por defecto).
+                candidate_slave = int(cfg["slave_id"])
                 last_probe_error: Optional[str] = None
-                for candidate_slave in candidates:
-                    try:
-                        probe_addr = _probe_register_address(board_id)
-                        probe = serial_client.read_holding_registers(
-                            address=probe_addr,
-                            count=1,
-                            device_id=candidate_slave,
-                        )
-                        if probe.isError():
-                            raise RuntimeError(f"Probe Modbus error: {probe}")
-                        if cfg["slave_id"] != candidate_slave:
-                            pms.update_module(board_id, slave_id=candidate_slave)
-                            add_event("INFO", f"slave_id autodetectado: {candidate_slave}", board_id)
-                        clients[board_id] = serial_client
-                        io_state[board_id]["connected"] = True
-                        io_state[board_id]["error"] = None
-                        add_event(
-                            "OK",
-                            f"RTU conectado en {settings.modbus_serial_port} (slave_id={candidate_slave})",
-                            board_id,
-                        )
-                        _rtu_connect_skip_until = 0.0
-                        break
-                    except Exception as probe_err:  # noqa: BLE001
-                        last_probe_error = str(probe_err)
-                else:
+                try:
+                    probe_addr = _probe_register_address(board_id)
+                    probe = serial_client.read_holding_registers(
+                        address=probe_addr,
+                        count=1,
+                        device_id=candidate_slave,
+                    )
+                    if probe.isError():
+                        raise RuntimeError(f"Probe Modbus error: {probe}")
+                    clients[board_id] = serial_client
+                    io_state[board_id]["connected"] = True
+                    io_state[board_id]["error"] = None
+                    add_event(
+                        "OK",
+                        f"RTU conectado en {settings.modbus_serial_port} (slave_id={candidate_slave})",
+                        board_id,
+                    )
+                    _rtu_connect_skip_until = 0.0
+                except Exception as probe_err:  # noqa: BLE001
+                    last_probe_error = str(probe_err)
                     io_state[board_id]["connected"] = False
-                    io_state[board_id]["error"] = f"RTU no operativo: {last_probe_error}"
+                    io_state[board_id]["error"] = (
+                        f"RTU no operativo (slave_id={candidate_slave}): {last_probe_error}"
+                    )
                     add_event(
                         "ERR",
-                        f"Conexión RTU inválida tras probar slave_id {candidates}: {last_probe_error}",
+                        f"RTU no operativo (slave_id={candidate_slave}): {last_probe_error}",
                         board_id,
                     )
                     return False
@@ -949,9 +944,11 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
 
 
 class BoardConfig(BaseModel):
-    host: str
-    port: int = 502
-    slave_id: int = 1
+    """Actualización parcial: solo se persisten campos enviados en el JSON (evita slave_id=1 por defecto al omitirlo)."""
+
+    host: Optional[str] = None
+    port: Optional[int] = None
+    slave_id: Optional[int] = None
     name: Optional[str] = None
 
 
@@ -1239,10 +1236,13 @@ def disconnect_board(board_id: int):
 def update_board_config(board_id: int, config: BoardConfig):
     if not _board_exists(board_id):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
-    if config.name:
-        pms.update_module(board_id, host=config.host, port=config.port, slave_id=config.slave_id, name=config.name)
-    else:
-        pms.update_module(board_id, host=config.host, port=config.port, slave_id=config.slave_id)
+    patch = config.model_dump(exclude_unset=True, exclude_none=True)
+    if not patch:
+        raise HTTPException(
+            status_code=400,
+            detail="Nada que actualizar: envía al menos host, port, slave_id o name",
+        )
+    pms.apply_module_update(board_id, patch)
     cfg = _board_cfg(board_id)
     add_event("INFO", f"Config actualizada: {cfg['host']}:{cfg['port']} slave={cfg['slave_id']}", board_id)
     return {

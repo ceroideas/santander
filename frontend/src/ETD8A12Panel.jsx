@@ -1740,10 +1740,11 @@ export default function ETD8A12Panel() {
       try {
         const mod = moduleList.find((x) => x.id === id);
         const bc = boardConfigs[id] || {};
+        // Preferir datos de moduleList (p. ej. tras guardar en «Definición placas») sobre boardConfigs del último poll.
         const body = {
-          host: bc.host ?? mod?.host ?? "",
-          port: bc.port ?? mod?.port ?? 5000,
-          slave_id: normalizeSlaveId(bc.slave_id ?? mod?.slave_id ?? 1),
+          host: mod?.host ?? bc.host ?? "",
+          port: Number(mod?.port ?? bc.port ?? 502),
+          slave_id: normalizeSlaveId(mod?.slave_id ?? bc.slave_id ?? 1),
           ...(mod?.name ? { name: mod.name } : {}),
         };
         await apiFetch(`/boards/${id}/config`, {
