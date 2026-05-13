@@ -2085,7 +2085,12 @@ export default function ETD8A12Panel() {
                 </div>
               </div> */}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {Object.keys(rulesMap).map((ruleKey) => {
+                {Object.keys(rulesMap)
+                  .filter(
+                    (ruleKey) =>
+                      rulesMap[ruleKey]?.type === "enclavamiento",
+                  )
+                  .map((ruleKey) => {
                   const isActive = selectedMode === ruleKey;
                   return (
                     <button
