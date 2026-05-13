@@ -358,6 +358,8 @@ function RulesFormAssistant({
   const [wfEnabled, setWfEnabled] = useState(true);
   const [wfAuto, setWfAuto] = useState(true);
   const [wfType, setWfType] = useState("enclavamiento");
+  /** 0 = seguir nivel IN; >0 = pulso temporizado (s). Omisión en JSON = 0 en backend (detección). */
+  const [wfPulseSeconds, setWfPulseSeconds] = useState(0);
   const [loadKey, setLoadKey] = useState("");
   const [pickBl, setPickBl] = useState("");
   const [pickDeact, setPickDeact] = useState("");
@@ -397,6 +399,10 @@ function RulesFormAssistant({
       activate_outputs: [...wfActOut],
       deactivate_outputs: [...wfDeactOut],
     };
+    if (wfType === "pulso_5_sg") {
+      const n = parseInt(String(wfPulseSeconds).trim(), 10);
+      rule.pulse_seconds = Number.isFinite(n) ? Math.min(300, Math.max(0, n)) : 0;
+    }
     let parsed = {};
     try {
       parsed = JSON.parse(rulesJson || "{}");
@@ -442,6 +448,13 @@ function RulesFormAssistant({
     setWfEnabled(r.enabled !== false);
     setWfAuto(r.auto_execute !== false);
     setWfType(typeof r.type === "string" ? r.type : "enclavamiento");
+    const ps = r.pulse_seconds;
+    if (ps !== undefined && ps !== null && ps !== "") {
+      const n = parseInt(String(ps), 10);
+      setWfPulseSeconds(Number.isFinite(n) ? Math.min(300, Math.max(0, n)) : 0);
+    } else {
+      setWfPulseSeconds(0);
+    }
     addUI("INFO", `Formulario cargado desde «${loadKey}»`);
   };
 
@@ -683,10 +696,32 @@ function RulesFormAssistant({
           >
             <option value="enclavamiento">enclavamiento</option>
             <option value="manual">manual</option>
-            <option value="pulso_5_sg">pulso 5 sg</option>
+            <option value="pulso_5_sg">radar / pulso (0=detectar, N s=pulso)</option>
           </select>
         </div>
       </div>
+
+      {wfType === "pulso_5_sg" && (
+        <div style={{ ...assistSection, marginTop: -6, marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: C.textSub, marginBottom: 6 }}>
+            <code>pulse_seconds</code>: <strong>0</strong> = salida sigue al IN mientras detecte (y
+            bloqueos); <strong>1–300</strong> = pulso en segundos tras flanco de subida (sin clave en
+            JSON el backend usa 0 = detección).
+          </div>
+          <label style={{ fontSize: 12, color: C.textMid, display: "flex", alignItems: "center", gap: 8 }}>
+            Segundos (0 = detectar)
+            <input
+              type="number"
+              min={0}
+              max={300}
+              className="rules-assist-control"
+              value={wfPulseSeconds}
+              onChange={(e) => setWfPulseSeconds(Number(e.target.value))}
+              style={{ width: 80 }}
+            />
+          </label>
+        </div>
+      )}
 
       <div style={assistSection}>
         <div

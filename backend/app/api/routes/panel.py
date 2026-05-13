@@ -32,8 +32,14 @@ DISABLE_IN_OUT_RELATION_ON_CONNECT = False
 
 # Tipos de regla que participan en el ciclo automático (background / _evaluate_auto_rules).
 AUTO_RULE_TYPES = frozenset({"enclavamiento", "pulso_5_sg"})
+# `pulse_seconds`: 0 = seguimiento por nivel del trigger (radar); >0 = pulso en segundos (omisión = 0 = detección).
 PULSE_5_SG_TYPE = "pulso_5_sg"
-PULSE_5_SG_DEFAULT_SECONDS = 5
+PULSE_5_SG_DEFAULT_SECONDS = 0
+
+
+def _rule_owns_operational_mode(rule: dict) -> bool:
+    """Solo `enclavamiento` define el modo operativo global (`current_mode`). Pulso, manual, etc. no lo sustituyen."""
+    return (rule.get("type") or "enclavamiento") == "enclavamiento"
 
 
 def _pymodbus_client_kwargs() -> Dict[str, Any]:
@@ -192,9 +198,11 @@ def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
                 "last_trigger_active": False,
                 "last_executed_at": None,
                 "pulse_until": None,
+                "last_follow_on": False,
             }
         else:
             rules_runtime[k].setdefault("pulse_until", None)
+            rules_runtime[k].setdefault("last_follow_on", False)
 
 
 _sync_mode_latches_from_rules(rules_config)
@@ -651,18 +659,28 @@ def _default_rule_runtime(rule_key: str) -> dict:
             "last_trigger_active": False,
             "last_executed_at": None,
             "pulse_until": None,
+            "last_follow_on": False,
         }
     rules_runtime[rule_key].setdefault("pulse_until", None)
+    rules_runtime[rule_key].setdefault("last_follow_on", False)
     return rules_runtime[rule_key]
 
 
 def _pulse_seconds(rule: dict) -> int:
-    raw = rule.get("pulse_seconds", PULSE_5_SG_DEFAULT_SECONDS)
+    """0 = modo detección (sigue nivel del trigger). N>0 = duración del pulso en segundos (máx. 300).
+    Sin clave o null = PULSE_5_SG_DEFAULT_SECONDS (0 = detección)."""
+    if "pulse_seconds" not in rule:
+        return PULSE_5_SG_DEFAULT_SECONDS
+    raw = rule.get("pulse_seconds")
+    if raw is None:
+        return PULSE_5_SG_DEFAULT_SECONDS
     try:
         n = int(raw)
     except (TypeError, ValueError):
         return PULSE_5_SG_DEFAULT_SECONDS
-    return max(1, min(n, 300))
+    if n <= 0:
+        return 0
+    return min(n, 300)
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -720,20 +738,113 @@ def _evaluate_pulse_5_sg_rule(
     use_overrides: bool = True,
     apply_outputs_to_hardware: bool = True,
 ) -> dict:
-    """Pulso temporizado: flanco de subida enciende activate_outputs durante pulse_seconds (por defecto 5). No modifica current_mode."""
+    """`pulso_5_sg`: si `pulse_seconds` es 0, seguimiento por nivel del trigger; si N>0, pulso temporizado de N s.
+    No modifica `current_mode`."""
     rule = rules_config.get(rule_key)
     if not rule:
         return {"executed": False, "reason": f"Regla no encontrada: {rule_key}"}
     runtime = _default_rule_runtime(rule_key)
-    now = datetime.now()
-    end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
-    if end_dt is not None and now >= end_dt:
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
-        runtime["pulse_until"] = None
-        add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
+    secs = _pulse_seconds(rule)
 
     if not rule.get("enabled", True):
+        if runtime.get("last_follow_on"):
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            runtime["last_follow_on"] = False
+        if runtime.get("pulse_until"):
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            runtime["pulse_until"] = None
         return {"executed": False, "reason": "Regla deshabilitada"}
+
+    if secs > 0:
+        now = datetime.now()
+        end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
+        if end_dt is not None and now >= end_dt:
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            runtime["pulse_until"] = None
+            add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
+
+        trigger_code = rule.get("trigger", "IN_01_01")
+        trigger_active = _read_input_effective(
+            trigger_code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+        )
+        blocked_codes = rule.get("blocked_if_active", [])
+        blocked_active_codes = [
+            code
+            for code in blocked_codes
+            if _blocked_signal_active(
+                code,
+                use_hardware_if_no_override=use_hardware_if_no_override,
+                use_overrides=use_overrides,
+            )
+        ]
+
+        if runtime.get("pulse_until"):
+            runtime["last_trigger_active"] = trigger_active
+            return {
+                "executed": False,
+                "reason": "Pulso en curso",
+                "trigger_input_active": trigger_active,
+                "pulse_until": runtime.get("pulse_until"),
+                "pulse_seconds": secs,
+                "follow_mode": False,
+            }
+
+        if not manual:
+            rising_edge = trigger_active and not runtime["last_trigger_active"]
+            runtime["last_trigger_active"] = trigger_active
+            if not rising_edge:
+                return {
+                    "executed": False,
+                    "reason": "Sin flanco de subida en trigger",
+                    "trigger_input_active": trigger_active,
+                    "pulse_seconds": secs,
+                    "follow_mode": False,
+                }
+        elif not trigger_active:
+            return {
+                "executed": False,
+                "reason": f"No se ejecuta: {trigger_code} no está activa",
+                "trigger_input_active": False,
+                "pulse_seconds": secs,
+                "follow_mode": False,
+            }
+
+        if blocked_active_codes:
+            add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+            return {
+                "executed": False,
+                "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+                "trigger_input_active": trigger_active,
+                "blocked_inputs": blocked_active_codes,
+                "pulse_seconds": secs,
+                "follow_mode": False,
+            }
+
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        until = now + timedelta(seconds=secs)
+        runtime["pulse_until"] = until.isoformat()
+        runtime["last_executed_at"] = now.isoformat()
+        add_event("OK", f"Pulso {secs}s iniciado: {rule_key}", 1)
+        return {
+            "executed": True,
+            "mode": current_mode,
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "outputs_activated": rule.get("activate_outputs", []),
+            "outputs_deactivated": rule.get("deactivate_outputs", []),
+            "pulse_seconds": secs,
+            "pulse_until": runtime["pulse_until"],
+            "follow_mode": False,
+            "timestamp": runtime["last_executed_at"],
+        }
+
+    # --- Modo detección (pulse_seconds == 0): sigue nivel del trigger ---
+    if runtime.get("pulse_until"):
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+        runtime["pulse_until"] = None
 
     trigger_code = rule.get("trigger", "IN_01_01")
     trigger_active = _read_input_effective(
@@ -751,50 +862,84 @@ def _evaluate_pulse_5_sg_rule(
             use_overrides=use_overrides,
         )
     ]
+    desired = bool(trigger_active) and not blocked_active_codes
+    last = bool(runtime.get("last_follow_on"))
 
-    if runtime.get("pulse_until"):
+    if manual:
+        if blocked_active_codes:
+            add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+            return {
+                "executed": False,
+                "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+                "trigger_input_active": trigger_active,
+                "blocked_inputs": blocked_active_codes,
+                "follow_on": False,
+                "pulse_seconds": 0,
+                "follow_mode": True,
+            }
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        runtime["last_follow_on"] = True
         runtime["last_trigger_active"] = trigger_active
+        runtime["last_executed_at"] = datetime.now().isoformat()
+        add_event("OK", f"Seguimiento radar (manual): ON {rule_key}", 1)
         return {
-            "executed": False,
-            "reason": "Pulso en curso",
+            "executed": True,
+            "mode": current_mode,
             "trigger_input_active": trigger_active,
-            "pulse_until": runtime.get("pulse_until"),
+            "blocked_inputs": blocked_active_codes,
+            "outputs_activated": rule.get("activate_outputs", []),
+            "follow_on": True,
+            "pulse_seconds": 0,
+            "follow_mode": True,
+            "timestamp": runtime["last_executed_at"],
         }
 
-    if not manual:
-        rising_edge = trigger_active and not runtime["last_trigger_active"]
-        runtime["last_trigger_active"] = trigger_active
-        if not rising_edge:
-            return {"executed": False, "reason": "Sin flanco de subida en trigger", "trigger_input_active": trigger_active}
-    elif not trigger_active:
-        return {"executed": False, "reason": f"No se ejecuta: {trigger_code} no está activa", "trigger_input_active": False}
+    runtime["last_trigger_active"] = trigger_active
 
-    if blocked_active_codes:
-        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+    if desired and not last:
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        runtime["last_follow_on"] = True
+        runtime["last_executed_at"] = datetime.now().isoformat()
+        add_event("OK", f"Radar ON → salidas regla {rule_key}", 1)
         return {
-            "executed": False,
-            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "executed": True,
+            "mode": current_mode,
             "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "outputs_activated": rule.get("activate_outputs", []),
+            "follow_on": True,
+            "pulse_seconds": 0,
+            "follow_mode": True,
+            "timestamp": runtime["last_executed_at"],
         }
 
-    _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
-    _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+    if not desired and last:
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+        runtime["last_follow_on"] = False
+        runtime["last_executed_at"] = datetime.now().isoformat()
+        add_event("INFO", f"Radar OFF o bloqueo → salidas OFF {rule_key}", 1)
+        return {
+            "executed": True,
+            "mode": current_mode,
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "outputs_activated": rule.get("activate_outputs", []),
+            "follow_on": False,
+            "pulse_seconds": 0,
+            "follow_mode": True,
+            "timestamp": runtime["last_executed_at"],
+        }
 
-    secs = _pulse_seconds(rule)
-    until = now + timedelta(seconds=secs)
-    runtime["pulse_until"] = until.isoformat()
-    runtime["last_executed_at"] = now.isoformat()
-    add_event("OK", f"Pulso {secs}s iniciado: {rule_key}", 1)
     return {
-        "executed": True,
-        "mode": None,
+        "executed": False,
+        "reason": "Sin cambio de nivel",
         "trigger_input_active": trigger_active,
         "blocked_inputs": blocked_active_codes,
-        "outputs_activated": rule.get("activate_outputs", []),
-        "outputs_deactivated": rule.get("deactivate_outputs", []),
-        "pulse_seconds": secs,
-        "pulse_until": runtime["pulse_until"],
-        "timestamp": runtime["last_executed_at"],
+        "follow_on": desired,
+        "pulse_seconds": 0,
+        "follow_mode": True,
     }
 
 
@@ -818,9 +963,15 @@ def _evaluate_trigger_rule(
             apply_outputs_to_hardware=apply_outputs_to_hardware,
         )
     if rule_key not in rules_runtime:
-        rules_runtime[rule_key] = {"last_trigger_active": False, "last_executed_at": None, "pulse_until": None}
+        rules_runtime[rule_key] = {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        }
     else:
         rules_runtime[rule_key].setdefault("pulse_until", None)
+        rules_runtime[rule_key].setdefault("last_follow_on", False)
     runtime = rules_runtime[rule_key]
 
     if not rule.get("enabled", True):
@@ -866,9 +1017,10 @@ def _evaluate_trigger_rule(
         mode_latches[code] = False
         board_id, channel = _parse_in_code(code)
         input_overrides[board_id][channel - 1] = False
-    current_mode = rule_key
+    if _rule_owns_operational_mode(rule):
+        current_mode = rule_key
+        _persist_current_mode_to_db()
     _persist_overrides_to_db()
-    _persist_current_mode_to_db()
 
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
@@ -952,9 +1104,11 @@ def _deactivate_rule_on_fall(
     if rule.get("type") != "enclavamiento" or not rule.get("enabled", True):
         return False
     runtime = rules_runtime.setdefault(
-        rule_key, {"last_trigger_active": False, "last_executed_at": None, "pulse_until": None}
+        rule_key,
+        {"last_trigger_active": False, "last_executed_at": None, "pulse_until": None, "last_follow_on": False},
     )
     runtime.setdefault("pulse_until", None)
+    runtime.setdefault("last_follow_on", False)
     trigger_code = rule.get("trigger")
     if not isinstance(trigger_code, str) or not trigger_code:
         return False
@@ -994,8 +1148,8 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     """
     Ciclo autónomo de backend:
     - refresca IO real de placas conectadas
-    - evalúa reglas automáticas con entrada real (sin override)
-    - opcional: desactiva regla activa al caer su trigger
+    - evalúa reglas automáticas con entrada efectiva (hardware + overrides de IN en panel)
+    - opcional: desactiva regla activa al caer su trigger (también respecto a overrides)
     """
     global background_auto_rules_last_run_at
     global background_auto_rules_last_result
@@ -1021,7 +1175,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
                 rk,
                 manual=False,
                 use_hardware_if_no_override=True,
-                use_overrides=False,
+                use_overrides=True,
                 apply_outputs_to_hardware=True,
             )
             if result.get("executed"):
@@ -1029,7 +1183,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             if deactivate_on_fall and _deactivate_rule_on_fall(
                 rk,
                 use_hardware_if_no_override=True,
-                use_overrides=False,
+                use_overrides=True,
                 apply_outputs_to_hardware=True,
             ):
                 deactivated += 1
@@ -1104,10 +1258,27 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
         rt = _default_rule_runtime(rule_key)
         secs = _pulse_seconds(rule)
-        rt["pulse_until"] = (datetime.now() + timedelta(seconds=secs)).isoformat()
+        rt["pulse_until"] = None
+        rt["last_follow_on"] = secs <= 0
         rt["last_executed_at"] = datetime.now().isoformat()
+        if secs > 0:
+            rt["pulse_until"] = (datetime.now() + timedelta(seconds=secs)).isoformat()
+            _persist_overrides_to_db()
+            add_event("OK", f"Pulso forzado {secs}s: {rule_key}", 1)
+            return {
+                "executed": True,
+                "rule": rule_key,
+                "trigger": rule.get("trigger"),
+                "deactivate_modes": rule.get("deactivate_modes", []),
+                "outputs_activated": rule.get("activate_outputs", []),
+                "outputs_deactivated": rule.get("deactivate_outputs", []),
+                "pulse_seconds": secs,
+                "pulse_until": rt["pulse_until"],
+                "follow_mode": False,
+                "mode": current_mode,
+            }
         _persist_overrides_to_db()
-        add_event("OK", f"Pulso forzado {secs}s: {rule_key}", 1)
+        add_event("OK", f"Seguimiento radar forzado ON: {rule_key}", 1)
         return {
             "executed": True,
             "rule": rule_key,
@@ -1115,8 +1286,9 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "deactivate_modes": rule.get("deactivate_modes", []),
             "outputs_activated": rule.get("activate_outputs", []),
             "outputs_deactivated": rule.get("deactivate_outputs", []),
-            "pulse_seconds": secs,
-            "pulse_until": rt["pulse_until"],
+            "pulse_seconds": 0,
+            "follow_on": True,
+            "follow_mode": True,
             "mode": current_mode,
         }
 
@@ -1157,9 +1329,10 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             if 1 <= ch <= len(outs):
                 io_state[b]["outputs"][ch - 1] = False
 
-    current_mode = rule_key
+    if _rule_owns_operational_mode(rule):
+        current_mode = rule_key
+        _persist_current_mode_to_db()
     _persist_overrides_to_db()
-    _persist_current_mode_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
     add_event("OK", f"Regla forzada ejecutada: {rule_key}", 1)
