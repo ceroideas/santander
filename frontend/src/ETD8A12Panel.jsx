@@ -1734,7 +1734,7 @@ export default function ETD8A12Panel() {
       }
     });
   };
-
+  // forzar push
   const doConfig = async (id) => {
     await withGlobalLoader(async () => {
       try {
