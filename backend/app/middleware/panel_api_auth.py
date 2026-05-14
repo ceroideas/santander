@@ -1,4 +1,4 @@
-"""Exige JWT de panel en /api salvo rutas públicas (auth, health, tablet v1)."""
+"""Exige JWT de panel en /api salvo rutas públicas (auth, health, ping, tablet v1, …)."""
 from __future__ import annotations
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -18,6 +18,8 @@ def _api_base() -> str:
 def _is_public_api_path(path: str) -> bool:
     base = _api_base()
     if path == f"{base}/health":
+        return True
+    if path == f"{base}/ping":
         return True
     if path == f"{base}/status":
         return True
