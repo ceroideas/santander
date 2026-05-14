@@ -697,6 +697,8 @@ def _read_input_effective(
     code: str,
     use_hardware_if_no_override: bool = True,
     use_overrides: bool = True,
+    *,
+    physical_inputs: bool = False,
 ) -> bool:
     board_id, channel = _parse_in_code(code)
     if not _board_exists(board_id):
@@ -704,18 +706,20 @@ def _read_input_effective(
     ins, _ = pms.get_channels_for_module(board_id)
     if not 1 <= channel <= len(ins):
         raise HTTPException(status_code=400, detail=f"Canal inválido en {code}")
-    if use_overrides:
+    if use_overrides and not physical_inputs:
         forced = input_overrides[board_id][channel - 1]
         if forced is not None:
             return forced
     if not use_hardware_if_no_override:
-        # En modo pruebas, si no hay override explícito, usar estado efectivo cacheado.
+        # En modo pruebas, usar estado cacheado (efectivo = raw + overrides tristate).
         return io_state[board_id]["inputs"][channel - 1]
     if not io_state[board_id]["connected"]:
         _connect_board(board_id)
     if not io_state[board_id]["connected"]:
         raise HTTPException(status_code=503, detail=f"No se pudo conectar placa {board_id} para leer {code}")
     _read_all_io(board_id)
+    # Tras refrescar el bus, el trigger debe seguir el IN efectivo (merge raw + override).
+    # Devolver solo inputs_raw rompía overrides a ON y duplicaba lógica frente a `inputs`.
     return io_state[board_id]["inputs"][channel - 1]
 
 
@@ -724,8 +728,9 @@ def _blocked_signal_active(
     *,
     use_hardware_if_no_override: bool = True,
     use_overrides: bool = True,
+    physical_inputs: bool = False,
 ) -> bool:
-    """True si la condición de bloqueo está activa: IN_* con overrides; OUT_* leyendo salidas (cache / Modbus si conectado)."""
+    """True si la condición de bloqueo está activa: IN_* (físico o efectivo según flags); OUT_* leyendo salidas."""
     code = (code or "").strip()
     if not code:
         return False
@@ -747,6 +752,7 @@ def _blocked_signal_active(
         code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
+        physical_inputs=physical_inputs,
     )
 
 
@@ -844,6 +850,8 @@ def _evaluate_pulse_5_sg_rule(
     use_hardware_if_no_override: bool = True,
     use_overrides: bool = True,
     apply_outputs_to_hardware: bool = True,
+    *,
+    physical_inputs: bool = False,
 ) -> dict:
     """`pulso_5_sg`: si `pulse_seconds` es 0, seguimiento por nivel del trigger; si N>0, pulso temporizado de N s.
     No modifica `current_mode`."""
@@ -875,6 +883,7 @@ def _evaluate_pulse_5_sg_rule(
             trigger_code,
             use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
         )
         blocked_codes = rule.get("blocked_if_active", [])
         blocked_active_codes = [
@@ -884,6 +893,7 @@ def _evaluate_pulse_5_sg_rule(
                 code,
                 use_hardware_if_no_override=use_hardware_if_no_override,
                 use_overrides=use_overrides,
+                physical_inputs=physical_inputs,
             )
         ]
 
@@ -958,6 +968,7 @@ def _evaluate_pulse_5_sg_rule(
         trigger_code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
+        physical_inputs=physical_inputs,
     )
     blocked_codes = rule.get("blocked_if_active", [])
     blocked_active_codes = [
@@ -967,6 +978,7 @@ def _evaluate_pulse_5_sg_rule(
             code,
             use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
         )
     ]
     desired = bool(trigger_active) and not blocked_active_codes
@@ -1058,6 +1070,7 @@ def _evaluate_trigger_rule(
     apply_outputs_to_hardware: bool = True,
 ) -> dict:
     global current_mode
+    phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
     rule = rules_config.get(rule_key)
     if not rule:
         return {"executed": False, "reason": f"Regla no encontrada: {rule_key}"}
@@ -1068,6 +1081,7 @@ def _evaluate_trigger_rule(
             use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
             apply_outputs_to_hardware=apply_outputs_to_hardware,
+            physical_inputs=phy_in,
         )
     if rule_key not in rules_runtime:
         rules_runtime[rule_key] = {
@@ -1089,6 +1103,7 @@ def _evaluate_trigger_rule(
         trigger_code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
+        physical_inputs=phy_in,
     )
     blocked_codes = rule.get("blocked_if_active", [])
     blocked_active_codes = [
@@ -1098,6 +1113,7 @@ def _evaluate_trigger_rule(
             code,
             use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
+            physical_inputs=phy_in,
         )
     ]
 
@@ -1232,6 +1248,7 @@ def _deactivate_rule_on_fall(
         trigger_code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
+        physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
     )
     runtime["last_trigger_active"] = trigger_active
     if trigger_active:
@@ -1350,13 +1367,17 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     if not rule.get("enabled", True):
         return {"executed": False, "reason": "Regla deshabilitada", "rule": rule_key}
 
-    # Incluso en ejecución forzada, respetar bloqueos por entradas activas.
-    # Se evalúa estado efectivo: override si existe, si no hardware real.
+    # Incluso en ejecución forzada, respetar bloqueos por entradas activas (IN según panel_rules_triggers_use_physical_inputs).
     blocked_codes = rule.get("blocked_if_active", [])
     blocked_active_codes = [
         code
         for code in blocked_codes
-        if _blocked_signal_active(code, use_hardware_if_no_override=True, use_overrides=True)
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=True,
+            use_overrides=True,
+            physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
+        )
     ]
     if blocked_active_codes:
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)

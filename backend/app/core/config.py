@@ -80,12 +80,17 @@ class Settings(BaseSettings):
     # Evaluación automática de reglas en background (independiente del dashboard)
     auto_rules_background_enabled: bool = True
     # Intervalo entre ciclos completos (lectura placas + reglas); mayor = menos tráfico Modbus.
-    auto_rules_background_interval_seconds: int = 10
+    auto_rules_background_interval_seconds: int = 2
     # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
     auto_rules_deactivate_on_fall: bool = True
 
     # Lecturas I/O consecutivas fallidas antes de marcar la placa como desconectada (RTU/buses inestables).
     panel_modbus_read_failures_before_disconnect: int = 3
+
+    # Si True, triggers y blocked_if_active no devuelven el override sin leer el bus: primero se refresca
+    # Modbus y luego se usa el IN efectivo (raw + override tristate, ver _read_all_io). Si False, un override
+    # forzado puede satisfacer el trigger sin lectura previa (útil en simulación sin hardware).
+    panel_rules_triggers_use_physical_inputs: bool = True
 
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)
     # Por defecto: carpeta hermana frontend/dist (repo con backend/ y frontend/).
