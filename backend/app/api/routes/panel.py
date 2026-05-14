@@ -533,7 +533,12 @@ def _read_holding_block_if_contiguous(client: Any, slave: int, channels: List[di
     return [bool(res.registers[i]) for i in range(n)]
 
 
-def _read_all_io(board_id: int, retried: bool = False) -> None:
+def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: bool = False) -> None:
+    """
+    Lee OUT/IN (y opcionalmente relation_register) vía Modbus.
+    Si `_modbus_lock_held=True`, el caller ya tiene `modbus_io_lock` (p. ej. barrido global en GET /status)
+    para que ningún otro hilo meta peticiones entre placas y reducir errores de transaction_id en TCP.
+    """
     client = clients.get(board_id)
     if not _client_is_open(client):
         if board_id in io_state:
@@ -543,28 +548,29 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
     cfg = _board_cfg(board_id)
     slave = cfg["slave_id"]
     ins, outs = pms.get_channels_for_module(board_id)
-    try:
-        with modbus_io_lock:
-            out_batch = _read_holding_block_if_contiguous(client, slave, outs)
-            if out_batch is not None and len(out_batch) == len(outs):
-                for i, v in enumerate(out_batch):
-                    io_state[board_id]["outputs"][i] = v
-            else:
-                for i, ch in enumerate(outs):
-                    res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-                    if not res.isError() and res.registers:
-                        io_state[board_id]["outputs"][i] = bool(res.registers[0])
 
-            in_batch = _read_holding_block_if_contiguous(client, slave, ins)
-            if in_batch is not None and len(in_batch) == len(ins):
-                for i, v in enumerate(in_batch):
-                    io_state[board_id]["inputs_raw"][i] = v
-            else:
-                for i, ch in enumerate(ins):
-                    res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
-                    if not res.isError() and res.registers:
-                        io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
+    def _run_bus_reads() -> None:
+        out_batch = _read_holding_block_if_contiguous(client, slave, outs)
+        if out_batch is not None and len(out_batch) == len(outs):
+            for i, v in enumerate(out_batch):
+                io_state[board_id]["outputs"][i] = v
+        else:
+            for i, ch in enumerate(outs):
+                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                if not res.isError() and res.registers:
+                    io_state[board_id]["outputs"][i] = bool(res.registers[0])
 
+        in_batch = _read_holding_block_if_contiguous(client, slave, ins)
+        if in_batch is not None and len(in_batch) == len(ins):
+            for i, v in enumerate(in_batch):
+                io_state[board_id]["inputs_raw"][i] = v
+        else:
+            for i, ch in enumerate(ins):
+                res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
+                if not res.isError() and res.registers:
+                    io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
+
+        if settings.panel_poll_in_out_relation_register:
             rel_reg = cfg.get("relation_register")
             if rel_reg is not None:
                 res_rel = client.read_holding_registers(
@@ -572,6 +578,13 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
                 )
                 if not res_rel.isError() and getattr(res_rel, "registers", None):
                     io_state[board_id]["in_out_associated"] = res_rel.registers[0] != 0
+
+    try:
+        if _modbus_lock_held:
+            _run_bus_reads()
+        else:
+            with modbus_io_lock:
+                _run_bus_reads()
 
         effective_inputs: List[bool] = []
         for idx in range(len(ins)):
@@ -1196,9 +1209,10 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     deactivated = 0
     errors = 0
     error_messages: List[str] = []
-    for board_id in _module_ids():
-        if board_id in io_state and io_state[board_id]["connected"]:
-            _read_all_io(board_id)
+    with modbus_io_lock:
+        for board_id in _module_ids():
+            if board_id in io_state and io_state[board_id]["connected"]:
+                _read_all_io(board_id, _modbus_lock_held=True)
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
             continue
@@ -1496,9 +1510,12 @@ def get_status(
 ):
     cfg_map = pms.get_boards_config_map()
     if refresh_hardware:
-        for board_id in _module_ids():
-            if board_id in io_state and io_state[board_id]["connected"]:
-                _read_all_io(board_id)
+        # Un solo tramo bajo lock: evita que otro hilo (p. ej. otro GET /status o reglas) intercale
+        # Modbus TCP entre placa A y B y reduzca "transaction_id … Skipping".
+        with modbus_io_lock:
+            for board_id in _module_ids():
+                if board_id in io_state and io_state[board_id]["connected"]:
+                    _read_all_io(board_id, _modbus_lock_held=True)
     if run_auto_rules:
         _evaluate_auto_rules()
     return {

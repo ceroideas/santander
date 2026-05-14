@@ -40,7 +40,10 @@ class Settings(BaseSettings):
     modbus_timeout: float = 3.0
     # Reintentos pymodbus por petición; en remoto conviene 0–1 (cada read del status ya son muchas peticiones).
     modbus_retries: int = 1
-    modbus_mode: str = "tcp"  # tcp | rtu
+    # Si false, en cada barrido de placas no se lee el holding IN↔OUT (relation_register): menos tráfico Modbus;
+    # el estado del checkbox de asociación puede quedar menos al día hasta el siguiente POST o conexión.
+    panel_poll_in_out_relation_register: bool = True
+    modbus_mode: str = "rtu"  # tcp | rtu
     modbus_default_port: int = 5000  # Modbus TCP estándar; ETD8A12 suele usar 502 (no 5000).
     modbus_default_slave_id: int = 1
     modbus_serial_port: str = "COM7"

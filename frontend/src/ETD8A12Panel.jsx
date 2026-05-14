@@ -1542,7 +1542,13 @@ export default function ETD8A12Panel() {
       if (statusPollInFlightRef.current) return;
       statusPollInFlightRef.current = true;
       try {
-        const d = await apiFetch("/status");
+        const refreshHw =
+          isInitial ||
+          (typeof document !== "undefined" && !document.hidden);
+        const statusPath = refreshHw
+          ? "/status"
+          : "/status?refresh_hardware=false";
+        const d = await apiFetch(statusPath);
         setServer(true);
         if (Array.isArray(d.modules_config)) setModuleList(d.modules_config);
         const next = {};
@@ -1591,8 +1597,8 @@ export default function ETD8A12Panel() {
       }
     };
     poll(true);
-    // Polling más conservador para no saturar backend/placa.
-    const iv = setInterval(() => poll(false), 5000);
+    // ~7.5 s: menos solicitudes concurrentes al backend; pestaña oculta no fuerza Modbus.
+    const iv = setInterval(() => poll(false), 7500);
     return () => clearInterval(iv);
   }, []);
 
