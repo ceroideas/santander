@@ -87,9 +87,9 @@ class Settings(BaseSettings):
     # Lecturas I/O consecutivas fallidas antes de marcar la placa como desconectada (RTU/buses inestables).
     panel_modbus_read_failures_before_disconnect: int = 3
 
-    # Si True, triggers y blocked_if_active no devuelven el override sin leer el bus: primero se refresca
-    # Modbus y luego se usa el IN efectivo (raw + override tristate, ver _read_all_io). Si False, un override
-    # forzado puede satisfacer el trigger sin lectura previa (útil en simulación sin hardware).
+    # Si True, triggers y blocked_if_active refrescan Modbus y usan la lectura física (inputs_raw): un override
+    # OFF no tapa un IN activo por hardware; un override ON sigue sirviendo para prueba sin cable. Si False,
+    # el trigger sigue el IN efectivo del panel (override tristate, puede sin lectura previa).
     panel_rules_triggers_use_physical_inputs: bool = True
 
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)

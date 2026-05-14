@@ -710,17 +710,30 @@ def _read_input_effective(
         forced = input_overrides[board_id][channel - 1]
         if forced is not None:
             return forced
+    idx = channel - 1
     if not use_hardware_if_no_override:
-        # En modo pruebas, usar estado cacheado (efectivo = raw + overrides tristate).
-        return io_state[board_id]["inputs"][channel - 1]
+        raw_list = list(io_state[board_id].get("inputs_raw") or [])
+        raw = bool(raw_list[idx]) if idx < len(raw_list) else False
+        if physical_inputs:
+            forced = input_overrides[board_id][idx]
+            if use_overrides and forced is True:
+                return True
+            return raw
+        return io_state[board_id]["inputs"][idx]
     if not io_state[board_id]["connected"]:
         _connect_board(board_id)
     if not io_state[board_id]["connected"]:
         raise HTTPException(status_code=503, detail=f"No se pudo conectar placa {board_id} para leer {code}")
     _read_all_io(board_id)
-    # Tras refrescar el bus, el trigger debe seguir el IN efectivo (merge raw + override).
-    # Devolver solo inputs_raw rompía overrides a ON y duplicaba lógica frente a `inputs`.
-    return io_state[board_id]["inputs"][channel - 1]
+    raw_list = list(io_state[board_id].get("inputs_raw") or [])
+    raw = bool(raw_list[idx]) if idx < len(raw_list) else False
+    if physical_inputs:
+        # Lectura física manda: override OFF no enmascara ON del bus. Override ON (prueba) sigue activando.
+        forced = input_overrides[board_id][idx]
+        if use_overrides and forced is True:
+            return True
+        return raw
+    return io_state[board_id]["inputs"][idx]
 
 
 def _blocked_signal_active(
