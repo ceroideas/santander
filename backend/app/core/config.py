@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
     auto_rules_deactivate_on_fall: bool = True
 
+    # Lecturas I/O consecutivas fallidas antes de marcar la placa como desconectada (RTU/buses inestables).
+    panel_modbus_read_failures_before_disconnect: int = 3
+
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)
     # Por defecto: carpeta hermana frontend/dist (repo con backend/ y frontend/).
     # Si en el servidor solo copias dist a backend/static, define STATIC_DIR=./static

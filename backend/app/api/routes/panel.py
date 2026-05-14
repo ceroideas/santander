@@ -62,6 +62,12 @@ _RTU_OPEN_FAIL_BACKOFF_SEC: float = 60.0
 # Por placa: tras rechazo TCP (p. ej. WinError 10061 puerto mal), evita spam pymodbus en cada ciclo.
 _tcp_connect_skip_until: Dict[int, float] = {}
 _TCP_OPEN_FAIL_BACKOFF_SEC: float = 60.0
+# Por placa: fallos seguidos de _read_all_io antes de marcar connected=False (histéresis en bus ruidoso).
+_read_io_fail_streak: Dict[int, int] = {}
+
+
+def _reset_read_io_fail_streak(board_id: int) -> None:
+    _read_io_fail_streak.pop(board_id, None)
 
 
 def _module_ids() -> List[int]:
@@ -117,6 +123,7 @@ def _sync_runtime_from_db() -> None:
     for old in list(io_state.keys()):
         if old not in mids:
             io_state.pop(old, None)
+            _read_io_fail_streak.pop(old, None)
     for old in list(input_overrides.keys()):
         if old not in mids:
             input_overrides.pop(old, None)
@@ -543,6 +550,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
     if not _client_is_open(client):
         if board_id in io_state:
             io_state[board_id]["connected"] = False
+        _reset_read_io_fail_streak(board_id)
         return
 
     cfg = _board_cfg(board_id)
@@ -596,14 +604,30 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         io_state[board_id]["connected"] = True
         io_state[board_id]["last_update"] = datetime.now().isoformat()
         io_state[board_id]["error"] = None
+        _read_io_fail_streak[board_id] = 0
     except Exception as e:  # noqa: BLE001
         # Reintento único tras reconexión cuando el equipo resetea socket (WinError 10054).
         if not retried:
             _connect_board(board_id)
             if io_state[board_id]["connected"]:
                 return _read_all_io(board_id, retried=True)
-        io_state[board_id]["connected"] = False
-        io_state[board_id]["error"] = str(e)
+        still_open = _client_is_open(clients.get(board_id))
+        was_connected = bool(io_state.get(board_id, {}).get("connected"))
+        streak = _read_io_fail_streak.get(board_id, 0) + 1
+        _read_io_fail_streak[board_id] = streak
+        nmax = max(1, min(20, int(settings.panel_modbus_read_failures_before_disconnect)))
+        soft_ok = still_open and was_connected and streak < nmax
+        if soft_ok:
+            io_state[board_id]["connected"] = True
+            io_state[board_id]["error"] = (
+                f"Lectura Modbus inestable ({streak}/{nmax} fallos seguidos; se mantiene sesión): {e}"
+            )
+        else:
+            io_state[board_id]["connected"] = False
+            io_state[board_id]["error"] = str(e)
+            _reset_read_io_fail_streak(board_id)
+            if not soft_ok and was_connected:
+                add_event("WARN", f"Lectura Modbus: placa {board_id} marcada desconectada tras {streak} fallo(s): {e}", board_id)
 
 
 def _write_output(board_id: int, channel: int, state: bool) -> None:
@@ -622,6 +646,29 @@ def _write_output(board_id: int, channel: int, state: bool) -> None:
     if result.isError():
         raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en módulo {board_id}: {result}")
     io_state[board_id]["outputs"][channel - 1] = state
+
+
+def _write_output_if_connected(
+    board_id: int,
+    channel: int,
+    state: bool,
+    *,
+    out_code: str,
+    origin: str,
+) -> bool:
+    """
+    Igual que `_write_output` pero si el módulo no tiene sesión Modbus activa no escribe
+    (reglas/modos con varias placas: se omiten salidas de las desconectadas).
+    """
+    if not io_state.get(board_id, {}).get("connected"):
+        add_event(
+            "WARN",
+            f"{origin}: omitida salida {out_code} (módulo {board_id} sin Modbus conectado)",
+            board_id,
+        )
+        return False
+    _write_output(board_id, channel, state)
+    return True
 
 
 def _parse_in_code(code: str) -> tuple[int, int]:
@@ -751,26 +798,36 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def _pulse_apply_deactivate_outputs(rule: dict, apply_outputs_to_hardware: bool) -> None:
+def _pulse_apply_deactivate_outputs(
+    rule: dict, apply_outputs_to_hardware: bool, *, rule_key: str = ""
+) -> None:
+    tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
     for do_code in rule.get("deactivate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
         if apply_outputs_to_hardware:
             if not io_state[board_id]["connected"]:
                 _connect_board(board_id)
-            _write_output(board_id, channel, False)
+            _write_output_if_connected(
+                board_id, channel, False, out_code=do_code, origin=tag
+            )
         else:
             _, outs = pms.get_channels_for_module(board_id)
             if 1 <= channel <= len(outs):
                 io_state[board_id]["outputs"][channel - 1] = False
 
 
-def _pulse_apply_activate_outputs(rule: dict, apply_outputs_to_hardware: bool, state: bool) -> None:
+def _pulse_apply_activate_outputs(
+    rule: dict, apply_outputs_to_hardware: bool, state: bool, *, rule_key: str = ""
+) -> None:
+    tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
         if apply_outputs_to_hardware:
             if not io_state[board_id]["connected"]:
                 _connect_board(board_id)
-            _write_output(board_id, channel, state)
+            _write_output_if_connected(
+                board_id, channel, state, out_code=do_code, origin=tag
+            )
         else:
             _, outs = pms.get_channels_for_module(board_id)
             if 1 <= channel <= len(outs):
@@ -798,10 +855,10 @@ def _evaluate_pulse_5_sg_rule(
 
     if not rule.get("enabled", True):
         if runtime.get("last_follow_on"):
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["last_follow_on"] = False
         if runtime.get("pulse_until"):
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["pulse_until"] = None
         return {"executed": False, "reason": "Regla deshabilitada"}
 
@@ -809,7 +866,7 @@ def _evaluate_pulse_5_sg_rule(
         now = datetime.now()
         end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
         if end_dt is not None and now >= end_dt:
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["pulse_until"] = None
             add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
 
@@ -872,8 +929,8 @@ def _evaluate_pulse_5_sg_rule(
                 "follow_mode": False,
             }
 
-        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         until = now + timedelta(seconds=secs)
         runtime["pulse_until"] = until.isoformat()
         runtime["last_executed_at"] = now.isoformat()
@@ -893,7 +950,7 @@ def _evaluate_pulse_5_sg_rule(
 
     # --- Modo detección (pulse_seconds == 0): sigue nivel del trigger ---
     if runtime.get("pulse_until"):
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
         runtime["pulse_until"] = None
 
     trigger_code = rule.get("trigger", "IN_01_01")
@@ -927,8 +984,8 @@ def _evaluate_pulse_5_sg_rule(
                 "pulse_seconds": 0,
                 "follow_mode": True,
             }
-        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         runtime["last_follow_on"] = True
         runtime["last_trigger_active"] = trigger_active
         runtime["last_executed_at"] = datetime.now().isoformat()
@@ -948,8 +1005,8 @@ def _evaluate_pulse_5_sg_rule(
     runtime["last_trigger_active"] = trigger_active
 
     if desired and not last:
-        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         runtime["last_follow_on"] = True
         runtime["last_executed_at"] = datetime.now().isoformat()
         add_event("OK", f"Radar ON → salidas regla {rule_key}", 1)
@@ -966,7 +1023,7 @@ def _evaluate_pulse_5_sg_rule(
         }
 
     if not desired and last:
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
         runtime["last_follow_on"] = False
         runtime["last_executed_at"] = datetime.now().isoformat()
         add_event("INFO", f"Radar OFF o bloqueo → salidas OFF {rule_key}", 1)
@@ -1072,12 +1129,17 @@ def _evaluate_trigger_rule(
         _persist_current_mode_to_db()
     _persist_overrides_to_db()
 
+    origin_tag = f"enclavamiento:{rule_key}"
+    skipped_disconnected: List[str] = []
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
         if apply_outputs_to_hardware:
             if not io_state[board_id]["connected"]:
                 _connect_board(board_id)
-            _write_output(board_id, channel, True)
+            if not _write_output_if_connected(
+                board_id, channel, True, out_code=do_code, origin=origin_tag
+            ):
+                skipped_disconnected.append(do_code)
         else:
             _, outs = pms.get_channels_for_module(board_id)
             if 1 <= channel <= len(outs):
@@ -1088,7 +1150,10 @@ def _evaluate_trigger_rule(
         if apply_outputs_to_hardware:
             if not io_state[board_id]["connected"]:
                 _connect_board(board_id)
-            _write_output(board_id, channel, False)
+            if not _write_output_if_connected(
+                board_id, channel, False, out_code=do_code, origin=origin_tag
+            ):
+                skipped_disconnected.append(do_code)
         else:
             _, outs = pms.get_channels_for_module(board_id)
             if 1 <= channel <= len(outs):
@@ -1105,6 +1170,7 @@ def _evaluate_trigger_rule(
         "deactivated_modes": rule.get("deactivate_modes", []),
         "outputs_activated": rule.get("activate_outputs", []),
         "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "outputs_skipped_disconnected": skipped_disconnected,
         "timestamp": runtime["last_executed_at"],
     }
 
@@ -1183,8 +1249,9 @@ def _deactivate_rule_on_fall(
         if apply_outputs_to_hardware:
             if not io_state[b]["connected"]:
                 _connect_board(b)
-            if io_state[b]["connected"]:
-                _write_output(b, ch, False)
+            _write_output_if_connected(
+                b, ch, False, out_code=out_code, origin=f"desactiva_flanco:{rule_key}"
+            )
         else:
             _, outs = pms.get_channels_for_module(b)
             if 1 <= ch <= len(outs):
@@ -1305,8 +1372,8 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             b, ch = _parse_in_code(in_code)
             input_overrides[b][ch - 1] = False
             mode_latches[in_code] = False
-        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware)
-        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True)
+        _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
+        _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         rt = _default_rule_runtime(rule_key)
         secs = _pulse_seconds(rule)
         rt["pulse_until"] = None
@@ -1323,6 +1390,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
                 "deactivate_modes": rule.get("deactivate_modes", []),
                 "outputs_activated": rule.get("activate_outputs", []),
                 "outputs_deactivated": rule.get("deactivate_outputs", []),
+                "outputs_skipped_disconnected": [],
                 "pulse_seconds": secs,
                 "pulse_until": rt["pulse_until"],
                 "follow_mode": False,
@@ -1337,6 +1405,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "deactivate_modes": rule.get("deactivate_modes", []),
             "outputs_activated": rule.get("activate_outputs", []),
             "outputs_deactivated": rule.get("deactivate_outputs", []),
+            "outputs_skipped_disconnected": [],
             "pulse_seconds": 0,
             "follow_on": True,
             "follow_mode": True,
@@ -1354,14 +1423,16 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         input_overrides[b][ch - 1] = False
         mode_latches[in_code] = False
 
+    skipped_disconnected: List[str] = []
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
         if apply_outputs_to_hardware:
             if not io_state[b]["connected"]:
                 _connect_board(b)
-            if not io_state[b]["connected"]:
-                raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {b} para {out_code}")
-            _write_output(b, ch, True)
+            if not _write_output_if_connected(
+                b, ch, True, out_code=out_code, origin=f"forzado:{rule_key}"
+            ):
+                skipped_disconnected.append(out_code)
         else:
             _, outs = pms.get_channels_for_module(b)
             if 1 <= ch <= len(outs):
@@ -1372,9 +1443,10 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         if apply_outputs_to_hardware:
             if not io_state[b]["connected"]:
                 _connect_board(b)
-            if not io_state[b]["connected"]:
-                raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {b} para {out_code}")
-            _write_output(b, ch, False)
+            if not _write_output_if_connected(
+                b, ch, False, out_code=out_code, origin=f"forzado:{rule_key}"
+            ):
+                skipped_disconnected.append(out_code)
         else:
             _, outs = pms.get_channels_for_module(b)
             if 1 <= ch <= len(outs):
@@ -1394,6 +1466,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         "deactivate_modes": rule.get("deactivate_modes", []),
         "outputs_activated": rule.get("activate_outputs", []),
         "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "outputs_skipped_disconnected": skipped_disconnected,
         "mode": current_mode,
     }
 
@@ -1681,6 +1754,7 @@ def disconnect_board(board_id: int):
                 clients[mid] = None
                 if mid in io_state:
                     io_state[mid]["connected"] = False
+                _reset_read_io_fail_streak(mid)
         add_event("WARN", "RTU desconectado manualmente (bus completo)", board_id)
     else:
         with modbus_io_lock:
@@ -1692,6 +1766,7 @@ def disconnect_board(board_id: int):
                     pass
                 clients[board_id] = None
         io_state[board_id]["connected"] = False
+        _reset_read_io_fail_streak(board_id)
         add_event("WARN", "Desconectado manualmente", board_id)
     return {"board_id": board_id, "connected": False}
 

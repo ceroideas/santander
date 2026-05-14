@@ -182,28 +182,45 @@ const Btn = ({
 };
 
 async function apiFetch(path, opts = {}) {
+  const { timeoutMs, ...fetchOpts } = opts;
+  const useTimeout =
+    typeof timeoutMs === "number" && timeoutMs > 0 && !fetchOpts.signal;
+  const controller = useTimeout ? new AbortController() : null;
+  const timer = useTimeout
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
   const token = getPanelToken();
   const headers = {
     "Content-Type": "application/json",
-    ...(opts.headers || {}),
+    ...(fetchOpts.headers || {}),
   };
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
-  const res = await fetch(`${API}${path}`, {
-    ...opts,
-    headers,
-  });
-  if (res.status === 401) {
-    clearPanelToken();
-    window.location.assign("/login");
-    throw new Error("Sesión caducada o no autorizado");
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...fetchOpts,
+      headers,
+      ...(useTimeout ? { signal: controller.signal } : {}),
+    });
+    if (res.status === 401) {
+      clearPanelToken();
+      window.location.assign("/login");
+      throw new Error("Sesión caducada o no autorizado");
+    }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail || "Error");
+    }
+    return res.json();
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      throw new Error("Tiempo de espera agotado (el servidor o Modbus tardaron demasiado)");
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || "Error");
-  }
-  return res.json();
 }
 
 async function apiFetchZaguan(path, opts = {}) {
@@ -1538,62 +1555,92 @@ export default function ETD8A12Panel() {
   );
 
   useEffect(() => {
+    const mergeStatusPayload = (d) => {
+      if (Array.isArray(d.modules_config)) setModuleList(d.modules_config);
+      const next = {};
+      for (const [id, b] of Object.entries(d.boards || {})) {
+        const inputs = [...(b.inputs || [])];
+        const inputs_raw = [...(b.inputs_raw || b.inputs || [])];
+        const outputs = [...(b.outputs || [])];
+        const nIn = Math.max(inputs.length, inputs_raw.length);
+        let ov = [...(b.input_overrides || [])];
+        while (ov.length < nIn) ov.push(null);
+        ov = ov.slice(0, nIn);
+        while (inputs.length < nIn) inputs.push(false);
+        while (inputs_raw.length < nIn) inputs_raw.push(false);
+        next[+id] = {
+          connected: b.connected,
+          inputs: inputs.slice(0, nIn),
+          inputs_raw: inputs_raw.slice(0, nIn),
+          outputs,
+          input_overrides: ov,
+          error: b.error,
+          in_out_associated:
+            typeof b.in_out_associated === "boolean"
+              ? b.in_out_associated
+              : null,
+        };
+        if (b.config) {
+          setConfigs((p) => ({
+            ...p,
+            [+id]: {
+              host: b.config.host,
+              port: b.config.port,
+              slave_id: b.config.slave_id,
+            },
+          }));
+        }
+      }
+      setBoards((p) => ({ ...p, ...next }));
+      if (d.current_mode && rulesMapRef.current[d.current_mode]) {
+        setSelectedMode(d.current_mode);
+      }
+    };
+
     const poll = async (isInitial = false) => {
       if (statusPollInFlightRef.current) return;
       statusPollInFlightRef.current = true;
       try {
-        const refreshHw =
-          isInitial ||
-          (typeof document !== "undefined" && !document.hidden);
-        const statusPath = refreshHw
-          ? "/status"
-          : "/status?refresh_hardware=false";
-        const d = await apiFetch(statusPath);
-        setServer(true);
-        if (Array.isArray(d.modules_config)) setModuleList(d.modules_config);
-        const next = {};
-        for (const [id, b] of Object.entries(d.boards || {})) {
-          const inputs = [...(b.inputs || [])];
-          const inputs_raw = [...(b.inputs_raw || b.inputs || [])];
-          const outputs = [...(b.outputs || [])];
-          const nIn = Math.max(inputs.length, inputs_raw.length);
-          let ov = [...(b.input_overrides || [])];
-          while (ov.length < nIn) ov.push(null);
-          ov = ov.slice(0, nIn);
-          while (inputs.length < nIn) inputs.push(false);
-          while (inputs_raw.length < nIn) inputs_raw.push(false);
-          next[+id] = {
-            connected: b.connected,
-            inputs: inputs.slice(0, nIn),
-            inputs_raw: inputs_raw.slice(0, nIn),
-            outputs,
-            input_overrides: ov,
-            error: b.error,
-            in_out_associated:
-              typeof b.in_out_associated === "boolean"
-                ? b.in_out_associated
-                : null,
-          };
-          if (b.config) {
-            setConfigs((p) => ({
-              ...p,
-              [+id]: {
-                host: b.config.host,
-                port: b.config.port,
-                slave_id: b.config.slave_id,
-              },
-            }));
-          }
-        }
-        setBoards((p) => ({ ...p, ...next }));
-        if (d.current_mode && rulesMapRef.current[d.current_mode]) {
-          setSelectedMode(d.current_mode);
+        if (isInitial) {
+          // 1) Respuesta rápida sin Modbus: quita el bloqueo global pronto (no es “lento al enviar”).
+          const d0 = await apiFetch("/status?refresh_hardware=false", {
+            timeoutMs: 20000,
+          });
+          mergeStatusPayload(d0);
+          setServer(true);
+        } else {
+          const refreshHw =
+            typeof document !== "undefined" && !document.hidden;
+          const statusPath = refreshHw
+            ? "/status"
+            : "/status?refresh_hardware=false";
+          const d = await apiFetch(statusPath, { timeoutMs: 120000 });
+          mergeStatusPayload(d);
+          setServer(true);
         }
       } catch {
         setServer(false);
       } finally {
         statusPollInFlightRef.current = false;
         if (isInitial) setInitialStatusLoaded(true);
+      }
+      // 2) Tras pintar UI, refresco hardware en segundo plano (RTU puede tardar mucho).
+      if (isInitial) {
+        setTimeout(() => {
+          void (async () => {
+            if (statusPollInFlightRef.current) return;
+            statusPollInFlightRef.current = true;
+            try {
+              const d1 = await apiFetch("/status", { timeoutMs: 120000 });
+              mergeStatusPayload(d1);
+              setServer(true);
+            } catch {
+              /* mantener último estado */
+            } finally {
+              statusPollInFlightRef.current = false;
+            }
+          })();
+        }, 80);
       }
     };
     poll(true);
