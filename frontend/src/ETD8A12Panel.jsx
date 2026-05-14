@@ -1563,6 +1563,10 @@ export default function ETD8A12Panel() {
             outputs,
             input_overrides: ov,
             error: b.error,
+            in_out_associated:
+              typeof b.in_out_associated === "boolean"
+                ? b.in_out_associated
+                : null,
           };
           if (b.config) {
             setConfigs((p) => ({
@@ -1713,6 +1717,30 @@ export default function ETD8A12Panel() {
         addUI("WARN", `Placa ${id}: todas OFF`);
       } catch (e) {
         addUI("ERR", e.message);
+      }
+    });
+  };
+
+  const setInOutAssociation = async (id, associated) => {
+    await withGlobalLoader(async () => {
+      setPending((p) => ({ ...p, [`ioa${id}`]: true }));
+      try {
+        await apiFetch(`/boards/${id}/input-output-association`, {
+          method: "POST",
+          body: JSON.stringify({ associated }),
+        });
+        addUI(
+          "OK",
+          `Placa ${id}: IN↔OUT ${associated ? "acoplado" : "desacoplado"}`,
+        );
+        setBoards((prev) => ({
+          ...prev,
+          [id]: { ...prev[id], in_out_associated: associated },
+        }));
+      } catch (e) {
+        addUI("ERR", e.message);
+      } finally {
+        setPending((p) => ({ ...p, [`ioa${id}`]: false }));
       }
     });
   };
@@ -2243,12 +2271,15 @@ export default function ETD8A12Panel() {
                 <SecLabel>Estado de placas</SecLabel>
                 {orderedModuleIds.map((mid) => {
                   const m = metaFor(mid);
+                  const modCfg = moduleList.find((x) => x.id === mid);
+                  const hasInOutAssocReg = modCfg?.relation_register != null;
                   const b = boards[mid] || {
                     connected: false,
                     inputs: [],
                     inputs_raw: [],
                     outputs: [],
                     input_overrides: [],
+                    in_out_associated: null,
                   };
                   const nOut = b.outputs?.length ?? 0;
                   const nIn = b.inputs?.length ?? 0;
@@ -2542,7 +2573,7 @@ export default function ETD8A12Panel() {
                           {nIn || 0}
                         </strong>
                       </div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <Btn
                           small
                           onClick={() => doAllOn(mid)}
@@ -2557,6 +2588,46 @@ export default function ETD8A12Panel() {
                         >
                           Todas OFF
                         </Btn>
+                        {hasInOutAssocReg && (
+                          <label
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 6,
+                              fontSize: 11,
+                              color: C.textSub,
+                              cursor:
+                                b.connected && !pending[`ioa${mid}`]
+                                  ? "pointer"
+                                  : "not-allowed",
+                              marginLeft: 4,
+                            }}
+                            title={
+                              b.in_out_associated == null && b.connected
+                                ? "Estado del equipo aún no leído; al marcar/desmarcar se envía 1/0 al registro IN↔OUT"
+                                : "Acople IN↔OUT (1) / desacople (0) en el holding configurado en la placa"
+                            }
+                          >
+                            <input
+                              type="checkbox"
+                              ref={(el) => {
+                                if (el) {
+                                  el.indeterminate =
+                                    b.connected &&
+                                    b.in_out_associated == null;
+                                }
+                              }}
+                              checked={b.in_out_associated === true}
+                              disabled={
+                                !b.connected || Boolean(pending[`ioa${mid}`])
+                              }
+                              onChange={(e) => {
+                                setInOutAssociation(mid, e.target.checked);
+                              }}
+                            />
+                            IN↔OUT acoplado
+                          </label>
+                        )}
                       </div>
                     </div>
                   );

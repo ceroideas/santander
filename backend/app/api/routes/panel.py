@@ -136,6 +136,7 @@ def _sync_runtime_from_db() -> None:
             "inputs": [prev_eff[i] if i < len(prev_eff) else False for i in range(n_in)],
             "last_update": prev.get("last_update"),
             "error": prev.get("error"),
+            "in_out_associated": prev.get("in_out_associated"),
         }
         o_prev = input_overrides.get(mid, [])
         input_overrides[mid] = [
@@ -465,15 +466,45 @@ def _connect_board(board_id: int) -> bool:
                 _tcp_connect_skip_until.pop(board_id, None)
         # ETD8A12: desacoplar IN↔OUT de fábrica (ver `etd_disable_in_out_association_on_connect` en .env).
         if settings.etd_disable_in_out_association_on_connect:
-            try:
-                with modbus_io_lock:
-                    rel = cfg.get("relation_register")
-                    if rel is not None:
+            rel = cfg.get("relation_register")
+            if rel is None:
+                add_event(
+                    "WARN",
+                    "Desacople IN/OUT omitido: relation_register no definido en BD para este módulo",
+                    board_id,
+                )
+            else:
+                try:
+                    with modbus_io_lock:
                         c = clients.get(board_id)
-                        if c is not None:
-                            c.write_register(address=int(rel), value=0x0000, device_id=cfg["slave_id"])
-            except Exception:
-                pass
+                        if c is None:
+                            add_event(
+                                "WARN",
+                                "Desacople IN/OUT omitido: cliente Modbus no disponible",
+                                board_id,
+                            )
+                        else:
+                            sid = int(cfg["slave_id"])
+                            addr = int(rel)
+                            result = c.write_register(
+                                address=addr,
+                                value=0x0000,
+                                device_id=sid,
+                            )
+                            if hasattr(result, "isError") and result.isError():
+                                add_event(
+                                    "ERR",
+                                    f"Desacople IN/OUT Modbus error en 0x{addr:04X} slave={sid}: {result}",
+                                    board_id,
+                                )
+                            else:
+                                add_event(
+                                    "OK",
+                                    f"Desacople IN/OUT aplicado: holding 0x{addr:04X} ({addr})=0, slave_id={sid}",
+                                    board_id,
+                                )
+                except Exception as ex:  # noqa: BLE001
+                    add_event("ERR", f"Desacople IN/OUT excepción: {ex}", board_id)
         return True
     except Exception as e:  # noqa: BLE001
         io_state[board_id]["connected"] = False
@@ -533,6 +564,14 @@ def _read_all_io(board_id: int, retried: bool = False) -> None:
                     res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
                     if not res.isError() and res.registers:
                         io_state[board_id]["inputs_raw"][i] = bool(res.registers[0])
+
+            rel_reg = cfg.get("relation_register")
+            if rel_reg is not None:
+                res_rel = client.read_holding_registers(
+                    address=int(rel_reg), count=1, device_id=slave
+                )
+                if not res_rel.isError() and getattr(res_rel, "registers", None):
+                    io_state[board_id]["in_out_associated"] = res_rel.registers[0] != 0
 
         effective_inputs: List[bool] = []
         for idx in range(len(ins)):
@@ -1417,6 +1456,12 @@ class BulkCommandsBody(BaseModel):
     all_off: Optional[BulkCommandPair] = None
 
 
+class InOutAssociationBody(BaseModel):
+    """True = acople IN↔OUT (típ. valor 1 en holding); False = desacople (0)."""
+
+    associated: bool
+
+
 def _ensure_serial_client_connected() -> ModbusSerialClient:
     """Abre (o reutiliza) el cliente serial para diagnósticos RTU."""
     global serial_client
@@ -1718,6 +1763,48 @@ def all_outputs_off(board_id: int):
     io_state[board_id]["outputs"] = [False] * n_out
     add_event("OK", "Todas las salidas OFF", board_id)
     return {"board_id": board_id, "all_outputs": False}
+
+
+@router.post("/boards/{board_id}/input-output-association")
+def set_input_output_association(board_id: int, body: InOutAssociationBody):
+    """
+    Escribe el holding configurado en `relation_register` (p. ej. 0x00FA):
+    0 = desacoplado, 1 = acoplado (modo fábrica típico en ETD8A12).
+    Requiere módulo conectado por Modbus (mismo criterio que salidas).
+    """
+    if not _board_exists(board_id):
+        raise HTTPException(status_code=404, detail=f"Módulo {board_id} no encontrado")
+    cfg = _board_cfg(board_id)
+    rel = cfg.get("relation_register")
+    if rel is None:
+        raise HTTPException(
+            status_code=400,
+            detail="relation_register no definido en BD para este módulo",
+        )
+    client = get_client(board_id)
+    value = 1 if body.associated else 0
+    sid = int(cfg["slave_id"])
+    addr = int(rel)
+    try:
+        with modbus_io_lock:
+            result = client.write_register(address=addr, value=value, device_id=sid)
+        if hasattr(result, "isError") and result.isError():
+            add_event(
+                "ERR",
+                f"IN↔OUT asociación Modbus error en 0x{addr:04X} slave={sid} valor={value}: {result}",
+                board_id,
+            )
+            raise HTTPException(status_code=502, detail=str(result))
+        io_state[board_id]["in_out_associated"] = body.associated
+        add_event(
+            "OK",
+            f"IN↔OUT {'acoplado' if body.associated else 'desacoplado'}: holding 0x{addr:04X} ({addr})={value}, slave_id={sid}",
+            board_id,
+        )
+        return {"board_id": board_id, "associated": body.associated}
+    except ModbusException as e:
+        add_event("ERR", f"IN↔OUT asociación Modbus: {e}", board_id)
+        raise HTTPException(status_code=502, detail=f"Error Modbus: {e}") from e
 
 
 @router.post("/boards/{board_id}/outputs/bitmask")
