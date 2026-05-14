@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     modbus_serial_parity: str = "N"
     modbus_serial_stopbits: int = 1
 
+    # ETD8A12 (Eletechsup): de fábrica suele venir en modo asociado (INx activa OUTx por firmware).
+    # Si True, tras conectar Modbus TCP se escribe 0 en `relation_register` del módulo (p. ej. 250 = 0xFA
+    # en panel_modules) para intentar desacoplar IN/OUT; el estado queda solo vía lecturas Modbus.
+    # Otras revisiones usan registro de “modo de trabajo” distinto (p. ej. 0x0030): ver manual impreso.
+    # Riesgo: algunas placas cierran el socket al escribir 0xFA; probar en banco antes de producción.
+    etd_disable_in_out_association_on_connect: bool = True
+
     # Persistencia estado (alcance: cada 60 s)
     state_save_interval_seconds: int = 60
 

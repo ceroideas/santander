@@ -27,8 +27,7 @@ CMD_CLOSE_ALL = 0x0800
 REG_OUTPUT_START = 0x0000
 REG_OUTPUT_BITS = 0x0070
 REG_INPUT_START = 0x0080
-REG_IN_OUT_RELATION = 0x00FA
-DISABLE_IN_OUT_RELATION_ON_CONNECT = False
+REG_IN_OUT_RELATION = 0x00FA  # Típico registro “relación IN/OUT” en ETD8A12; el valor por módulo va en panel_modules.relation_register
 
 # Tipos de regla que participan en el ciclo automático (background / _evaluate_auto_rules).
 AUTO_RULE_TYPES = frozenset({"enclavamiento", "pulso_5_sg"})
@@ -464,9 +463,8 @@ def _connect_board(board_id: int) -> bool:
                     return False
 
                 _tcp_connect_skip_until.pop(board_id, None)
-        # Algunos ETD8A12 cierran socket si se escribe 0x00FA al conectar.
-        # Se deja desactivado por defecto para priorizar estabilidad de enlace.
-        if DISABLE_IN_OUT_RELATION_ON_CONNECT:
+        # ETD8A12: desacoplar IN↔OUT de fábrica (ver `etd_disable_in_out_association_on_connect` en .env).
+        if settings.etd_disable_in_out_association_on_connect:
             try:
                 with modbus_io_lock:
                     rel = cfg.get("relation_register")
