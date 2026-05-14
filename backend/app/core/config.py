@@ -1,16 +1,27 @@
 """
 Configuración de la aplicación (variables de entorno y valores por defecto).
-Ver .env.example en la raíz de backend/.
+No hace falta crear .env: los valores por defecto están en la clase `Settings`.
+Si existe `backend/.env`, se usa como override opcional; siempre se pueden fijar
+variables de entorno del proceso (mismo nombre en MAYÚSCULAS).
 """
 from pathlib import Path
 from typing import Optional
 
 from pydantic import model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Si existe backend/.env se carga como override opcional; si no, solo defaults + variables del SO.
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+_ENV_PATH = _BACKEND_ROOT / ".env"
+_SETTINGS_CFG: dict = {"env_file_encoding": "utf-8", "extra": "ignore"}
+if _ENV_PATH.is_file():
+    _SETTINGS_CFG["env_file"] = str(_ENV_PATH)
 
 
 class Settings(BaseSettings):
-    """Configuración cargada desde entorno y archivo .env."""
+    """Configuración: defaults en código; overrides vía variables de entorno del proceso."""
+
+    model_config = SettingsConfigDict(**_SETTINGS_CFG)
 
     app_name: str = "Control de Accesos — Santander"
     app_version: str = "0.1.0"
@@ -37,9 +48,10 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/control_accesos.db"
 
     # Modbus ETD8A12 (por defecto; se puede sobreescribir desde boards_config en BD)
-    modbus_timeout: float = 3.0
-    # Reintentos pymodbus por petición; en remoto conviene 0–1 (cada read del status ya son muchas peticiones).
-    modbus_retries: int = 1
+    # Defaults pensados para menos carga y menos “No response… Repeating” en log cuando no hay .env.
+    modbus_timeout: float = 4.0
+    # 0 = un intento por petición Modbus (menos espera duplicada y menos ruido en log que retries=1).
+    modbus_retries: int = 0
     # Si false, en cada barrido de placas no se lee el holding IN↔OUT (relation_register): menos tráfico Modbus;
     # el estado del checkbox de asociación puede quedar menos al día hasta el siguiente POST o conexión.
     panel_poll_in_out_relation_register: bool = True
@@ -67,7 +79,8 @@ class Settings(BaseSettings):
 
     # Evaluación automática de reglas en background (independiente del dashboard)
     auto_rules_background_enabled: bool = True
-    auto_rules_background_interval_seconds: int = 5
+    # Intervalo entre ciclos completos (lectura placas + reglas); mayor = menos tráfico Modbus.
+    auto_rules_background_interval_seconds: int = 10
     # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
     auto_rules_deactivate_on_fall: bool = True
 
@@ -92,11 +105,6 @@ class Settings(BaseSettings):
         p = p.rstrip("/") or "/api"
         object.__setattr__(self, "api_prefix", p)
         return self
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 # Ruta base del proyecto backend (para resolver paths relativos)
