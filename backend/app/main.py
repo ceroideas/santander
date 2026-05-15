@@ -54,7 +54,10 @@ async def _auto_rules_background_loop() -> None:
     while True:
         await asyncio.sleep(interval_s)
         try:
-            panel.background_auto_rules_cycle(
+            # El ciclo hace I/O Modbus síncrono (RTU especialmente lento): en hilo aparte
+            # para no bloquear el bucle asyncio (API /ping, SPA, etc.).
+            await asyncio.to_thread(
+                panel.background_auto_rules_cycle,
                 deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall),
             )
         except Exception as e:  # noqa: BLE001
@@ -79,11 +82,11 @@ async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
             pass
         return
 
-    # Pulso de apertura: ON corto y luego OFF.
+    # Pulso de apertura: ON corto y luego OFF (Modbus síncrono → hilo aparte).
     try:
-        panel.api_v1_set_output_by_code(out_code, True)
+        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, True)
         await asyncio.sleep(ZAGUAN_PULSE_SECONDS)
-        panel.api_v1_set_output_by_code(out_code, False)
+        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, False)
     except Exception as e:  # noqa: BLE001
         log.warning("Error al ejecutar mapeo zaguán %s -> %s: %s", canal, out_code, e)
         try:

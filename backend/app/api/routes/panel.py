@@ -1220,7 +1220,7 @@ def _evaluate_horario_automatico(
     )
 
 
-def _evaluate_auto_rules() -> None:
+def _evaluate_auto_rules(*, use_hardware_if_no_override: bool = True) -> None:
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
             continue
@@ -1229,7 +1229,11 @@ def _evaluate_auto_rules() -> None:
         if rule.get("type") not in AUTO_RULE_TYPES:
             continue
         try:
-            _evaluate_trigger_rule(rk, manual=False)
+            _evaluate_trigger_rule(
+                rk,
+                manual=False,
+                use_hardware_if_no_override=use_hardware_if_no_override,
+            )
         except Exception as e:  # noqa: BLE001
             add_event("ERR", f"Error auto-evaluando {rk}: {e}", 1)
 
@@ -1294,9 +1298,10 @@ def _deactivate_rule_on_fall(
 def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     """
     Ciclo autónomo de backend:
-    - refresca IO real de placas conectadas
-    - evalúa reglas automáticas con entrada efectiva (hardware + overrides de IN en panel)
-    - opcional: desactiva regla activa al caer su trigger (también respecto a overrides)
+    - refresca IO real de placas conectadas (un barrido Modbus bajo lock)
+    - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
+      `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
+    - opcional: desactiva regla activa al caer su trigger
     """
     global background_auto_rules_last_run_at
     global background_auto_rules_last_result
@@ -1322,7 +1327,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             result = _evaluate_trigger_rule(
                 rk,
                 manual=False,
-                use_hardware_if_no_override=True,
+                use_hardware_if_no_override=False,
                 use_overrides=True,
                 apply_outputs_to_hardware=True,
             )
@@ -1330,7 +1335,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
                 executed += 1
             if deactivate_on_fall and _deactivate_rule_on_fall(
                 rk,
-                use_hardware_if_no_override=True,
+                use_hardware_if_no_override=False,
                 use_overrides=True,
                 apply_outputs_to_hardware=True,
             ):
@@ -1624,7 +1629,8 @@ def get_status(
                 if board_id in io_state and io_state[board_id]["connected"]:
                     _read_all_io(board_id, _modbus_lock_held=True)
     if run_auto_rules:
-        _evaluate_auto_rules()
+        # Si ya se refrescó hardware arriba, no repetir Modbus por cada regla (RTU).
+        _evaluate_auto_rules(use_hardware_if_no_override=not refresh_hardware)
     return {
         "boards": {
             str(bid): {
