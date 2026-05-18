@@ -55,7 +55,29 @@ clients: Dict[int, Optional[Any]] = {}
 io_state: Dict[int, dict] = {}
 input_overrides: Dict[int, List[Optional[bool]]] = {}
 serial_client: Optional[ModbusSerialClient] = None
+# RTU: un solo bus serie → un lock global. TCP: un RLock por placa (conexiones IP independientes).
 modbus_io_lock = threading.RLock()
+_board_modbus_locks: Dict[int, threading.RLock] = {}
+_board_modbus_locks_guard = threading.Lock()
+
+
+def _board_modbus_lock(board_id: int) -> threading.RLock:
+    """Candado de I/O Modbus para una placa. En RTU devuelve el lock del bus compartido."""
+    if _is_rtu_mode():
+        return modbus_io_lock
+    with _board_modbus_locks_guard:
+        lock = _board_modbus_locks.get(board_id)
+        if lock is None:
+            lock = threading.RLock()
+            _board_modbus_locks[board_id] = lock
+        return lock
+
+
+def _drop_board_modbus_lock(board_id: int) -> None:
+    with _board_modbus_locks_guard:
+        _board_modbus_locks.pop(board_id, None)
+
+
 # Tras fallo al abrir el puerto serie (p. ej. COM inexistente en PC remoto), evita spam de pymodbus/logs cada ciclo.
 _rtu_connect_skip_until: float = 0.0
 _RTU_OPEN_FAIL_BACKOFF_SEC: float = 60.0
@@ -119,15 +141,16 @@ def _sync_runtime_from_db() -> None:
     """Alinea clientes en memoria, tamaños de I/O y overrides con la configuración en SQLite."""
     global clients, io_state, input_overrides
     mids = _module_ids()
-    with modbus_io_lock:
-        for old in list(clients.keys()):
-            if old not in mids:
+    for old in list(clients.keys()):
+        if old not in mids:
+            with _board_modbus_lock(old):
                 c = clients.pop(old, None)
                 if c:
                     try:
                         c.close()
                     except Exception:
                         pass
+            _drop_board_modbus_lock(old)
     for old in list(io_state.keys()):
         if old not in mids:
             io_state.pop(old, None)
@@ -415,9 +438,9 @@ def _connect_board(board_id: int) -> bool:
                     f"(comprueba puerto Modbus, suele ser 502)"
                 )
                 return False
-            # Un solo hilo a la vez por socket Modbus TCP: evita mezcla de transaction_id
-            # (p. ej. GET /status + connect en paralelo sobre la misma placa).
-            with modbus_io_lock:
+            # Un solo hilo a la vez por socket de esta placa: evita mezcla de transaction_id
+            # en la misma IP; otras placas usan su propio lock (_board_modbus_lock).
+            with _board_modbus_lock(board_id):
                 if clients[board_id]:
                     try:
                         clients[board_id].close()
@@ -490,7 +513,7 @@ def _connect_board(board_id: int) -> bool:
                 )
             else:
                 try:
-                    with modbus_io_lock:
+                    with _board_modbus_lock(board_id):
                         c = clients.get(board_id)
                         if c is None:
                             add_event(
@@ -551,8 +574,8 @@ def _read_holding_block_if_contiguous(client: Any, slave: int, channels: List[di
 def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: bool = False) -> None:
     """
     Lee OUT/IN (y opcionalmente relation_register) vía Modbus.
-    Si `_modbus_lock_held=True`, el caller ya tiene `modbus_io_lock` (p. ej. barrido global en GET /status)
-    para que ningún otro hilo meta peticiones entre placas y reducir errores de transaction_id en TCP.
+    Si `_modbus_lock_held=True`, el caller ya tiene `_board_modbus_lock(board_id)` para esta placa
+    (evita transaction_id mezclados en el mismo socket TCP).
     """
     client = clients.get(board_id)
     if not _client_is_open(client):
@@ -599,7 +622,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         if _modbus_lock_held:
             _run_bus_reads()
         else:
-            with modbus_io_lock:
+            with _board_modbus_lock(board_id):
                 _run_bus_reads()
 
         effective_inputs: List[bool] = []
@@ -649,7 +672,7 @@ def _write_output(board_id: int, channel: int, state: bool) -> None:
     open_v = int(ch["open_cmd"]) if ch["open_cmd"] is not None else CMD_OPEN
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if state else close_v
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=f"Error Modbus escribiendo OUT{channel} en módulo {board_id}: {result}")
@@ -1306,7 +1329,7 @@ def _deactivate_rule_on_fall(
 def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     """
     Ciclo autónomo de backend:
-    - refresca IO real de placas conectadas (un barrido Modbus bajo lock)
+    - refresca IO real de placas conectadas (lectura Modbus con lock por placa en TCP)
     - evalúa reglas usando ese snapshot (`use_hardware_if_no_override=False`) para no repetir
       `_read_all_io` por cada regla (en RTU multiplica tráfico serie y satura el bus / CPU).
     - opcional: desactiva regla activa al caer su trigger
@@ -1319,9 +1342,9 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     deactivated = 0
     errors = 0
     error_messages: List[str] = []
-    with modbus_io_lock:
-        for board_id in _module_ids():
-            if board_id in io_state and io_state[board_id]["connected"]:
+    for board_id in _module_ids():
+        if board_id in io_state and io_state[board_id]["connected"]:
+            with _board_modbus_lock(board_id):
                 _read_all_io(board_id, _modbus_lock_held=True)
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
@@ -1630,11 +1653,10 @@ def get_status(
 ):
     cfg_map = pms.get_boards_config_map()
     if refresh_hardware:
-        # Un solo tramo bajo lock: evita que otro hilo (p. ej. otro GET /status o reglas) intercale
-        # Modbus TCP entre placa A y B y reduzca "transaction_id … Skipping".
-        with modbus_io_lock:
-            for board_id in _module_ids():
-                if board_id in io_state and io_state[board_id]["connected"]:
+        # Lectura por placa con lock independiente (TCP): una placa lenta no bloquea las demás.
+        for board_id in _module_ids():
+            if board_id in io_state and io_state[board_id]["connected"]:
+                with _board_modbus_lock(board_id):
                     _read_all_io(board_id, _modbus_lock_held=True)
     if run_auto_rules:
         # Si ya se refrescó hardware arriba, no repetir Modbus por cada regla (RTU).
@@ -1805,7 +1827,7 @@ def disconnect_board(board_id: int):
                 _reset_read_io_fail_streak(mid)
         add_event("WARN", "RTU desconectado manualmente (bus completo)", board_id)
     else:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             client = clients.get(board_id)
             if client:
                 try:
@@ -1858,7 +1880,7 @@ def set_output(board_id: int, action: ChannelAction):
     close_v = int(ch["close_cmd"]) if ch["close_cmd"] is not None else CMD_CLOSE
     value = open_v if action.state else close_v
     try:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             result = client.write_register(address=register, value=value, device_id=cfg["slave_id"])
         if result.isError():
             raise HTTPException(status_code=502, detail=f"Error Modbus: {result}")
@@ -1877,7 +1899,7 @@ def all_outputs_on(board_id: int):
     if "all_on" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_on configurado para este módulo")
     addr, val = bulk["all_on"]
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1895,7 +1917,7 @@ def all_outputs_off(board_id: int):
     if "all_off" not in bulk:
         raise HTTPException(status_code=400, detail="No hay comando all_off configurado para este módulo")
     addr, val = bulk["all_off"]
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=addr, value=val, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1926,7 +1948,7 @@ def set_input_output_association(board_id: int, body: InOutAssociationBody):
     sid = int(cfg["slave_id"])
     addr = int(rel)
     try:
-        with modbus_io_lock:
+        with _board_modbus_lock(board_id):
             result = client.write_register(address=addr, value=value, device_id=sid)
         if hasattr(result, "isError") and result.isError():
             add_event(
@@ -1962,7 +1984,7 @@ def set_outputs_bitmask(board_id: int, action: BitmaskAction):
     bitmask = 0
     for ch in action.channels_on:
         bitmask |= 1 << (ch - 1)
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         result = client.write_register(address=int(bm_addr), value=bitmask, device_id=cfg["slave_id"])
     if result.isError():
         raise HTTPException(status_code=502, detail=str(result))
@@ -1979,7 +2001,7 @@ def read_inputs(board_id: int):
     ins, _ = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values_raw: List[bool] = []
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         for ch in ins:
             res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
             if res.isError() or not res.registers:
@@ -2003,7 +2025,7 @@ def read_outputs(board_id: int):
     _, outs = pms.get_channels_for_module(board_id)
     slave = cfg["slave_id"]
     values: List[bool] = []
-    with modbus_io_lock:
+    with _board_modbus_lock(board_id):
         for ch in outs:
             res = client.read_holding_registers(address=int(ch["address"]), count=1, device_id=slave)
             if res.isError() or not res.registers:
@@ -2145,13 +2167,14 @@ def delete_module_api(module_id: int):
     if not _board_exists(module_id):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
     c = None
-    with modbus_io_lock:
+    with _board_modbus_lock(module_id):
         c = clients.pop(module_id, None)
-    if c:
-        try:
-            c.close()
-        except Exception:
-            pass
+        if c:
+            try:
+                c.close()
+            except Exception:
+                pass
+    _drop_board_modbus_lock(module_id)
     pms.delete_module(module_id)
     _sync_runtime_from_db()
     add_event("WARN", "Módulo eliminado de la configuración", module_id)
