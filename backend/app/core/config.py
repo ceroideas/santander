@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     # en panel_modules) para intentar desacoplar IN/OUT; el estado queda solo vía lecturas Modbus.
     # Otras revisiones usan registro de “modo de trabajo” distinto (p. ej. 0x0030): ver manual impreso.
     # Riesgo: algunas placas cierran el socket al escribir 0xFA; probar en banco antes de producción.
+    # False = igual que software prueba_ (no escribe 0xFA al conectar). True puede cerrar el socket en algunas placas.
     etd_disable_in_out_association_on_connect: bool = True
 
     # Persistencia estado (alcance: cada 60 s)

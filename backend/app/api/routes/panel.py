@@ -70,6 +70,14 @@ def _reset_read_io_fail_streak(board_id: int) -> None:
     _read_io_fail_streak.pop(board_id, None)
 
 
+def _connect_backoff_active(board_id: int) -> bool:
+    """True si un intento de conexión reciente falló y aún no toca reintentar."""
+    if _is_rtu_mode():
+        return time.monotonic() < _rtu_connect_skip_until
+    skip = _tcp_connect_skip_until.get(board_id)
+    return skip is not None and time.monotonic() < skip
+
+
 def _module_ids() -> List[int]:
     return pms.list_module_ids_ordered()
 
@@ -607,7 +615,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         _read_io_fail_streak[board_id] = 0
     except Exception as e:  # noqa: BLE001
         # Reintento único tras reconexión cuando el equipo resetea socket (WinError 10054).
-        if not retried:
+        if not retried and not _connect_backoff_active(board_id):
             _connect_board(board_id)
             if io_state[board_id]["connected"]:
                 return _read_all_io(board_id, retried=True)
