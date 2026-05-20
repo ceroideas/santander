@@ -50,6 +50,7 @@ def _pymodbus_client_kwargs() -> Dict[str, Any]:
 
 pms.ensure_panel_modules_schema()
 pms.seed_default_modules_if_empty()
+pms.sync_channel_names_from_catalog(only_if_empty=True)
 
 clients: Dict[int, Optional[Any]] = {}
 io_state: Dict[int, dict] = {}
@@ -704,22 +705,30 @@ def _write_output_if_connected(
 
 
 def _parse_in_code(code: str) -> tuple[int, int]:
-    # Formato recomendado: IN_YY_ZZ (sin XX)
-    parts = code.split("_")
+    parsed = pms.parse_smcse_code(code)
+    if parsed:
+        kind, module_id, slot_index = parsed
+        if kind != "input":
+            raise HTTPException(status_code=400, detail=f"{code} no es una entrada (DI)")
+        return module_id, slot_index
+    parts = code.strip().upper().split("_")
     if len(parts) == 3 and parts[0] == "IN":
         return int(parts[1]), int(parts[2])
-    # Compatibilidad legado: DI_01_YY_ZZ
     if len(parts) == 4 and parts[0] == "DI":
         return int(parts[2]), int(parts[3])
     raise HTTPException(status_code=400, detail=f"Código de entrada inválido: {code}")
 
 
 def _parse_out_code(code: str) -> tuple[int, int]:
-    parts = code.split("_")
-    # Nuevo formato recomendado: OUT_YY_ZZ (sin XX)
+    parsed = pms.parse_smcse_code(code)
+    if parsed:
+        kind, module_id, slot_index = parsed
+        if kind != "output":
+            raise HTTPException(status_code=400, detail=f"{code} no es una salida (DO)")
+        return module_id, slot_index
+    parts = code.strip().upper().split("_")
     if len(parts) == 3 and parts[0] == "OUT":
         return int(parts[1]), int(parts[2])
-    # Compatibilidad legado: DO_01_YY_ZZ
     if len(parts) == 4 and parts[0] == "DO":
         return int(parts[2]), int(parts[3])
     raise HTTPException(status_code=400, detail=f"Código de salida inválido: {code}")
@@ -1677,6 +1686,7 @@ class ChannelCreateBody(BaseModel):
     address: int
     slot_index: Optional[int] = None
     label: Optional[str] = None
+    channel_name: Optional[str] = None
     open_cmd: Optional[int] = None
     close_cmd: Optional[int] = None
 
@@ -1684,6 +1694,7 @@ class ChannelCreateBody(BaseModel):
 class ChannelPatchBody(BaseModel):
     slot_index: Optional[int] = None
     label: Optional[str] = None
+    channel_name: Optional[str] = None
     address: Optional[int] = None
     open_cmd: Optional[int] = None
     close_cmd: Optional[int] = None
@@ -2277,6 +2288,7 @@ def add_channel_api(module_id: int, body: ChannelCreateBody):
         body.address,
         slot_index=body.slot_index,
         label=body.label,
+        channel_name=body.channel_name,
         open_cmd=body.open_cmd,
         close_cmd=body.close_cmd,
     )
@@ -2296,13 +2308,15 @@ def patch_channel_api(module_id: int, channel_id: int, body: ChannelPatchBody):
         ).fetchone()
     if not row or row[0] != module_id:
         raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
+    patch = body.model_dump(exclude_unset=True)
     pms.update_channel(
         channel_id,
-        slot_index=body.slot_index,
-        label=body.label,
-        address=body.address,
-        open_cmd=body.open_cmd,
-        close_cmd=body.close_cmd,
+        slot_index=patch.get("slot_index"),
+        label=patch["label"] if "label" in patch else ...,
+        channel_name=patch["channel_name"] if "channel_name" in patch else ...,
+        address=patch.get("address"),
+        open_cmd=patch["open_cmd"] if "open_cmd" in patch else ...,
+        close_cmd=patch["close_cmd"] if "close_cmd" in patch else ...,
     )
     _sync_runtime_from_db()
     return {"ok": True, "channel_id": channel_id}

@@ -276,6 +276,54 @@ function slugRuleKey(displayName) {
   return slug || "regla_sin_nombre";
 }
 
+function inputChannelState(board, index) {
+  const forced = board.input_overrides?.[index];
+  const isForced = forced !== null && forced !== undefined;
+  const raw = board.inputs_raw?.[index] ?? board.inputs?.[index] ?? false;
+  const effective = isForced ? forced : (board.inputs?.[index] ?? raw);
+  return {
+    effective: Boolean(effective),
+    raw: Boolean(raw),
+    isForced,
+    forcedOn: forced === true,
+    forcedOff: forced === false,
+    activeByOverride: isForced && effective === true,
+  };
+}
+
+function formatEventDateTime(e) {
+  const raw = e?.date || e?.created_at;
+  if (raw) {
+    const d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleString("es-ES", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
+    }
+  }
+  return e?.ts || "";
+}
+
+function channelIoTitle(kind, index, channel, opts = {}) {
+  const tag = kind === "input" ? "IN" : "OUT";
+  const num = index + 1;
+  const name = (channel?.channel_name || "").trim();
+  let base;
+  if (name) base = `${tag}${num}: ${name}`;
+  else {
+    const code = channel?.io_code || channel?.smcse_code || channel?.label;
+    base = code ? `${tag}${num} (${code})` : `${tag}${num}`;
+  }
+  if (opts.activeByOverride) base += " (override)";
+  return base;
+}
+
 function buildIoOptions(moduleList) {
   const ins = [];
   const outs = [];
@@ -964,6 +1012,76 @@ function RulesFormAssistant({
   );
 }
 
+function ModuleChannelRow({ mod, channel, index, onDelete, onRefresh, addUI, showCmdCols }) {
+  const [channelName, setChannelName] = useState(channel.channel_name ?? "");
+
+  useEffect(() => {
+    setChannelName(channel.channel_name ?? "");
+  }, [channel.id, channel.channel_name]);
+
+  const saveChannelName = async () => {
+    const trimmed = channelName.trim();
+    try {
+      await apiFetch(`/modules/${mod.id}/channels/${channel.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ channel_name: trimmed || null }),
+      });
+      addUI("OK", `Nombre guardado: ${trimmed || "(vacío)"}`);
+      await onRefresh();
+    } catch (e) {
+      addUI("ERR", e.message);
+    }
+  };
+
+  return (
+    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+      <td style={{ padding: 4, whiteSpace: "nowrap" }}>#{index + 1}</td>
+      <td style={{ padding: 4, fontFamily: "monospace" }}>{fmtHex(channel.address)}</td>
+      {showCmdCols ? (
+        <td style={{ padding: 4, fontFamily: "monospace", color: C.muted }}>
+          {channel.open_cmd != null ? fmtHex(channel.open_cmd) : "def"} /{" "}
+          {channel.close_cmd != null ? fmtHex(channel.close_cmd) : "def"}
+        </td>
+      ) : null}
+      <td style={{ padding: 4 }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <input
+            value={channelName}
+            onChange={(e) => setChannelName(e.target.value)}
+            placeholder="Nombre del canal"
+            title={channel.smcse_code || channel.io_code || ""}
+            style={{
+              flex: "1 1 120px",
+              minWidth: 100,
+              maxWidth: 200,
+              padding: "4px 6px",
+              fontSize: 11,
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveChannelName();
+            }}
+          />
+          <Btn small variant="primary" onClick={saveChannelName}>
+            Guardar
+          </Btn>
+          <Btn small variant="danger" onClick={onDelete}>
+            Quitar
+          </Btn>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function ModuleDbEditor({ mod, addUI, onRefresh }) {
   const [name, setName] = useState(mod.name);
   const [host, setHost] = useState(mod.host);
@@ -1329,17 +1447,16 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       >
         <tbody>
           {inp.map((c, i) => (
-            <tr key={c.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: 4 }}>#{i + 1}</td>
-              <td style={{ padding: 4, fontFamily: "monospace" }}>
-                {fmtHex(c.address)}
-              </td>
-              <td style={{ padding: 4 }}>
-                <Btn small variant="danger" onClick={() => delCh(c.id)}>
-                  Quitar
-                </Btn>
-              </td>
-            </tr>
+            <ModuleChannelRow
+              key={c.id}
+              mod={mod}
+              channel={c}
+              index={i}
+              showCmdCols={false}
+              addUI={addUI}
+              onRefresh={onRefresh}
+              onDelete={() => delCh(c.id)}
+            />
           ))}
         </tbody>
       </table>
@@ -1379,23 +1496,16 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
       >
         <tbody>
           {out.map((c, i) => (
-            <tr key={c.id} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: 4 }}>#{i + 1}</td>
-              <td style={{ padding: 4, fontFamily: "monospace" }}>
-                {fmtHex(c.address)}
-              </td>
-              <td
-                style={{ padding: 4, fontFamily: "monospace", color: C.muted }}
-              >
-                {c.open_cmd != null ? fmtHex(c.open_cmd) : "def"} /{" "}
-                {c.close_cmd != null ? fmtHex(c.close_cmd) : "def"}
-              </td>
-              <td style={{ padding: 4 }}>
-                <Btn small variant="danger" onClick={() => delCh(c.id)}>
-                  Quitar
-                </Btn>
-              </td>
-            </tr>
+            <ModuleChannelRow
+              key={c.id}
+              mod={mod}
+              channel={c}
+              index={i}
+              showCmdCols
+              addUI={addUI}
+              onRefresh={onRefresh}
+              onDelete={() => delCh(c.id)}
+            />
           ))}
         </tbody>
       </table>
@@ -1716,20 +1826,20 @@ export default function ETD8A12Panel() {
     }
   }, [rulesJson]);
 
-  // useEffect(() => {
-  //   if (!serverOnline) return;
-  //   const pollEvents = async () => {
-  //     try {
-  //       const d = await apiFetch("/events?limit=300");
-  //       setEvents(d.events || []);
-  //     } catch {
-  //       // silent
-  //     }
-  //   };
-  //   pollEvents();
-  //   const iv = setInterval(pollEvents, 2000);
-  //   return () => clearInterval(iv);
-  // }, [serverOnline]);
+  useEffect(() => {
+    if (!serverOnline) return;
+    const pollEvents = async () => {
+      try {
+        const d = await apiFetch("/events?limit=500");
+        setEvents(d.events || []);
+      } catch {
+        // silent
+      }
+    };
+    pollEvents();
+    const iv = setInterval(pollEvents, 3000);
+    return () => clearInterval(iv);
+  }, [serverOnline]);
 
   useEffect(() => {
     logEnd.current?.scrollIntoView({ behavior: "smooth" });
@@ -2862,13 +2972,23 @@ export default function ETD8A12Panel() {
           >
             {orderedModuleIds.map((mid) => {
               const m = metaFor(mid);
+              const modCfg = moduleList.find((x) => x.id === mid);
               const b = boards[mid] || {
                 connected: false,
                 inputs: [],
+                inputs_raw: [],
+                input_overrides: [],
                 outputs: [],
               };
+              const nInIo = Math.max(
+                b.inputs?.length || 0,
+                b.inputs_raw?.length || 0,
+                b.input_overrides?.length || 0,
+              );
               const outputsActive = (b.outputs || []).filter(Boolean).length;
-              const inputsActive = (b.inputs || []).filter(Boolean).length;
+              const inputsActive = Array.from({ length: nInIo }, (_, i) =>
+                inputChannelState(b, i).effective,
+              ).filter(Boolean).length;
               return (
                 <Card
                   key={mid}
@@ -3002,6 +3122,7 @@ export default function ETD8A12Panel() {
                     {(b.outputs || []).map((v, i) => (
                       <div
                         key={i}
+                        title={channelIoTitle("output", i, modCfg?.outputs?.[i])}
                         style={{
                           border: `1px solid ${v ? C.redBorder : C.border}`,
                           background: v ? C.redFaint : C.white,
@@ -3011,6 +3132,7 @@ export default function ETD8A12Panel() {
                           fontWeight: 700,
                           color: v ? C.red : C.textSub,
                           textAlign: "center",
+                          cursor: "default",
                         }}
                       >{`OUT${i + 1}`}</div>
                     ))}
@@ -3037,21 +3159,48 @@ export default function ETD8A12Panel() {
                       gap: 6,
                     }}
                   >
-                    {(b.inputs || []).map((v, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          border: `1px solid ${v ? C.amberBorder : C.border}`,
-                          background: v ? C.amberLight : C.white,
-                          borderRadius: 6,
-                          padding: "7px 0",
-                          textAlign: "center",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          color: v ? C.amber : C.textSub,
-                        }}
-                      >{`IN${i + 1}`}</div>
-                    ))}
+                    {Array.from({ length: nInIo }, (_, i) => {
+                      const st = inputChannelState(b, i);
+                      return (
+                        <div
+                          key={i}
+                          title={channelIoTitle("input", i, modCfg?.inputs?.[i], {
+                            activeByOverride: st.activeByOverride,
+                          })}
+                          style={{
+                            border: `1px solid ${
+                              st.forcedOn
+                                ? C.greenBorder
+                                : st.forcedOff
+                                  ? C.blue
+                                  : st.effective
+                                    ? C.amberBorder
+                                    : C.border
+                            }`,
+                            background: st.forcedOn
+                              ? C.greenLight
+                              : st.forcedOff
+                                ? C.blueLight
+                                : st.effective
+                                  ? C.amberLight
+                                  : C.white,
+                            borderRadius: 6,
+                            padding: "7px 0",
+                            textAlign: "center",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: st.forcedOn
+                              ? C.green
+                              : st.forcedOff
+                                ? C.blue
+                                : st.effective
+                                  ? C.amber
+                                  : C.textSub,
+                            cursor: "default",
+                          }}
+                        >{`IN${i + 1}`}</div>
+                      );
+                    })}
                   </div>
                 </Card>
               );
@@ -3259,7 +3408,7 @@ export default function ETD8A12Panel() {
                             flexWrap: "wrap",
                           }}
                         >
-                          <span>{e.ts}</span>
+                          <span>{formatEventDateTime(e)}</span>
                           <span
                             style={{
                               fontSize: 10,
