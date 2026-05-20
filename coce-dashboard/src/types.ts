@@ -1,3 +1,6 @@
+/** Estado de monitorización en el COCE (maqueta / futuro tiempo real). */
+export type SucursalEstado = 'operativo' | 'no_operativo' | 'apagado';
+
 /** Registro local de una sucursal (sistema local en oficina). */
 export type Sucursal = {
   id: string;
@@ -13,6 +16,8 @@ export type Sucursal = {
   /** Opcional: usuario panel web para JWT y `/api/panel/status` (placas) */
   usuarioPanel?: string;
   passwordPanel?: string;
+  /** Por defecto operativo si no está definido */
+  estado?: SucursalEstado;
 };
 
 export type PanelModeRule = {

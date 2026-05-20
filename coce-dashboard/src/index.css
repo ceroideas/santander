@@ -10,7 +10,7 @@
   --warn: #b88700;
   --danger: #bf3f3f;
   --radius: 10px;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: "Segoe UI", system-ui, sans-serif;
   line-height: 1.45;
   color: var(--text);
   background: var(--bg);
@@ -92,6 +92,7 @@ a {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  width: 100%;
 }
 
 .coce-topbar {
@@ -115,10 +116,12 @@ a {
 
 .coce-content {
   padding: 1.1rem 1.25rem 1.5rem;
+  width: 100%;
 }
 
 .content-view {
-  max-width: 1220px;
+  width: 100%;
+  max-width: none;
 }
 
 .app-header {
@@ -208,9 +211,9 @@ label.field span {
   color: var(--muted);
   margin-bottom: 0.25rem;
 }
-input[type='text'],
-input[type='password'],
-input[type='number'] {
+input[type="text"],
+input[type="password"],
+input[type="number"] {
   width: 100%;
   max-width: 520px;
   padding: 0.5rem 0.65rem;
@@ -303,24 +306,189 @@ th {
   color: #0f4c81;
 }
 
-.sucursal-list {
-  display: grid;
-  gap: 0.62rem;
+.sucursal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
 }
-.sucursal-item {
+
+.sucursal-toolbar .sucursal-search {
+  flex: 1;
+  min-width: 220px;
+  margin-bottom: 0;
+}
+
+.sucursal-filter {
+  flex: 0 0 220px;
+  min-width: 180px;
+}
+
+.sucursal-filter-select {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.sucursal-filter-select:focus {
+  outline: 2px solid rgba(236, 28, 36, 0.24);
+  border-color: var(--accent);
+}
+
+.sucursal-search-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.sucursal-search-input {
+  width: 100%;
+  max-width: none;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.95rem;
+}
+
+.sucursal-search-input:focus {
+  outline: 2px solid rgba(236, 28, 36, 0.24);
+  border-color: var(--accent);
+}
+
+.sucursal-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+}
+
+.sucursal-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: none;
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.1),
+    0 1px 3px rgba(15, 23, 42, 0.06);
+  border-radius: var(--radius);
+  overflow: hidden;
+
+  min-width: 320px;
+}
+
+.sucursal-card-status {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  flex-wrap: wrap;
-  padding: 0.82rem 0.95rem;
-  background: var(--surface);
-  border-radius: var(--radius);
-  border: 1px solid var(--surface2);
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  z-index: 1;
 }
-.sucursal-item .meta {
+
+.sucursal-card-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.sucursal-card-status--operativo {
+  color: var(--ok);
+}
+
+.sucursal-card-status--no_operativo {
+  color: var(--warn);
+}
+
+.sucursal-card-status--apagado {
+  color: var(--danger);
+}
+
+.sucursal-card-icon-wrap {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem 1rem;
+  color: var(--accent);
+  max-height: 150px;
+}
+
+.sucursal-card-icon {
+  width: 100%;
+  max-width: 200px;
+  height: auto;
+}
+
+.sucursal-card-name {
+  color: var(--accent);
+  padding: 0rem 0.85rem;
+  font-weight: 700;
+  font-size: 1.2rem;
+  text-align: center;
+}
+
+.sucursal-card-ip {
+  padding: 0.55rem 0.85rem;
+  font-size: 0.82rem;
   color: var(--muted);
-  font-size: 0.85rem;
+  text-align: center;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.sucursal-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
+  padding: 0.65rem 0.75rem;
+}
+
+.sucursal-card-footer .btn-open {
+  background: #fff;
+  color: var(--ok);
+  border-color: #86efac;
+}
+.sucursal-card-footer .btn-open:hover {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #4ade80;
+}
+
+.sucursal-card-footer .btn-ghost {
+  background: #fff;
+  color: #334155;
+  border-color: #cbd5e1;
+}
+.sucursal-card-footer .btn-ghost:hover {
+  background: #f1f5f9;
+}
+
+.sucursal-card-footer .btn-danger {
+  background: #fff;
+  color: var(--danger);
+  border-color: #f3b9b9;
+}
+.sucursal-card-footer .btn-danger:hover {
+  background: #fef2f2;
+}
+
+.btn-sm {
+  padding: 0.32rem 0.6rem;
+  font-size: 0.78rem;
 }
 
 .kpi-grid {
