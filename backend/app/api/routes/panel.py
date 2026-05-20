@@ -241,6 +241,7 @@ def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
         else:
             rules_runtime[k].setdefault("pulse_until", None)
             rules_runtime[k].setdefault("last_follow_on", False)
+            rules_runtime[k].setdefault("temp_deact_snapshot", {})
 
 
 _sync_mode_latches_from_rules(rules_config)
@@ -807,10 +808,84 @@ def _default_rule_runtime(rule_key: str) -> dict:
             "last_executed_at": None,
             "pulse_until": None,
             "last_follow_on": False,
+            "temp_deact_snapshot": {},
         }
     rules_runtime[rule_key].setdefault("pulse_until", None)
     rules_runtime[rule_key].setdefault("last_follow_on", False)
+    rules_runtime[rule_key].setdefault("temp_deact_snapshot", {})
     return rules_runtime[rule_key]
+
+
+def _rule_deactivate_outputs_temporary(rule: dict) -> bool:
+    """Si True, al soltar la regla se restauran solo los OUT que estaban ON antes de forzarlos a OFF."""
+    return bool(rule.get("deactivate_outputs_temporary"))
+
+
+def _read_output_cached(board_id: int, channel: int) -> bool:
+    outs = list(io_state.get(board_id, {}).get("outputs") or [])
+    if 1 <= channel <= len(outs):
+        return bool(outs[channel - 1])
+    return False
+
+
+def _snapshot_temp_deactivate_outputs(rule: dict, rule_key: str) -> None:
+    """Guarda en runtime qué OUT de deactivate_outputs estaban ON antes de apagarlos."""
+    if not _rule_deactivate_outputs_temporary(rule):
+        return
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = {}
+    for do_code in rule.get("deactivate_outputs") or []:
+        try:
+            board_id, channel = _parse_out_code(do_code)
+        except HTTPException:
+            continue
+        if _read_output_cached(board_id, channel):
+            snap[do_code] = True
+    runtime["temp_deact_snapshot"] = snap
+
+
+def _clear_temp_deactivate_snapshot(rule_key: str) -> None:
+    if rule_key in rules_runtime:
+        rules_runtime[rule_key]["temp_deact_snapshot"] = {}
+
+
+def _restore_temp_deactivate_outputs(
+    rule: dict,
+    rule_key: str,
+    apply_outputs_to_hardware: bool,
+    *,
+    origin: str,
+) -> List[str]:
+    """Vuelve a ON los OUT que estaban ON en el snapshot (desactivación temporal)."""
+    if not _rule_deactivate_outputs_temporary(rule):
+        return []
+    runtime = rules_runtime.get(rule_key) or {}
+    snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
+    restored: List[str] = []
+    for do_code, was_on in snap.items():
+        if not was_on:
+            continue
+        board_id, channel = _parse_out_code(do_code)
+        if apply_outputs_to_hardware:
+            if not io_state.get(board_id, {}).get("connected"):
+                _connect_board(board_id)
+            if _write_output_if_connected(
+                board_id, channel, True, out_code=do_code, origin=origin
+            ):
+                restored.append(do_code)
+        else:
+            _, outs = pms.get_channels_for_module(board_id)
+            if 1 <= channel <= len(outs):
+                io_state[board_id]["outputs"][channel - 1] = True
+                restored.append(do_code)
+    _clear_temp_deactivate_snapshot(rule_key)
+    if restored:
+        add_event(
+            "INFO",
+            f"Restauradas salidas (estaban ON antes de la regla): {', '.join(restored)}",
+            1,
+        )
+    return restored
 
 
 def _pulse_seconds(rule: dict) -> int:
@@ -848,10 +923,17 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def _pulse_apply_deactivate_outputs(
-    rule: dict, apply_outputs_to_hardware: bool, *, rule_key: str = ""
+def _apply_deactivate_outputs(
+    rule: dict,
+    apply_outputs_to_hardware: bool,
+    *,
+    rule_key: str = "",
+    origin: str = "",
 ) -> None:
-    tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
+    """Apaga deactivate_outputs; si `deactivate_outputs_temporary`, guarda snapshot previo."""
+    tag = origin or (f"rule:{rule_key}" if rule_key else "rule")
+    if rule_key and _rule_deactivate_outputs_temporary(rule):
+        _snapshot_temp_deactivate_outputs(rule, rule_key)
     for do_code in rule.get("deactivate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
         if apply_outputs_to_hardware:
@@ -864,6 +946,13 @@ def _pulse_apply_deactivate_outputs(
             _, outs = pms.get_channels_for_module(board_id)
             if 1 <= channel <= len(outs):
                 io_state[board_id]["outputs"][channel - 1] = False
+
+
+def _pulse_apply_deactivate_outputs(
+    rule: dict, apply_outputs_to_hardware: bool, *, rule_key: str = ""
+) -> None:
+    tag = f"pulso_5_sg:{rule_key}" if rule_key else "pulso_5_sg"
+    _apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key, origin=tag)
 
 
 def _pulse_apply_activate_outputs(
@@ -907,9 +996,15 @@ def _evaluate_pulse_5_sg_rule(
 
     if not rule.get("enabled", True):
         if runtime.get("last_follow_on"):
+            _restore_temp_deactivate_outputs(
+                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_off:{rule_key}"
+            )
             _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["last_follow_on"] = False
         if runtime.get("pulse_until"):
+            _restore_temp_deactivate_outputs(
+                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_fin:{rule_key}"
+            )
             _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["pulse_until"] = None
         return {"executed": False, "reason": "Regla deshabilitada"}
@@ -918,6 +1013,9 @@ def _evaluate_pulse_5_sg_rule(
         now = datetime.now()
         end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
         if end_dt is not None and now >= end_dt:
+            _restore_temp_deactivate_outputs(
+                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_fin:{rule_key}"
+            )
             _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["pulse_until"] = None
             add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
@@ -1079,6 +1177,9 @@ def _evaluate_pulse_5_sg_rule(
         }
 
     if not desired and last:
+        restored = _restore_temp_deactivate_outputs(
+            rule, rule_key, apply_outputs_to_hardware, origin=f"radar_off:{rule_key}"
+        )
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
         runtime["last_follow_on"] = False
         runtime["last_executed_at"] = datetime.now().isoformat()
@@ -1092,6 +1193,7 @@ def _evaluate_pulse_5_sg_rule(
             "follow_on": False,
             "pulse_seconds": 0,
             "follow_mode": True,
+            "outputs_restored": restored,
             "timestamp": runtime["last_executed_at"],
         }
 
@@ -1205,20 +1307,9 @@ def _evaluate_trigger_rule(
             if 1 <= channel <= len(outs):
                 io_state[board_id]["outputs"][channel - 1] = True
                 add_event("INFO", f"SIMULADO {do_code} -> ON (sin hardware)", board_id)
-    for do_code in rule.get("deactivate_outputs", []):
-        board_id, channel = _parse_out_code(do_code)
-        if apply_outputs_to_hardware:
-            if not io_state[board_id]["connected"]:
-                _connect_board(board_id)
-            if not _write_output_if_connected(
-                board_id, channel, False, out_code=do_code, origin=origin_tag
-            ):
-                skipped_disconnected.append(do_code)
-        else:
-            _, outs = pms.get_channels_for_module(board_id)
-            if 1 <= channel <= len(outs):
-                io_state[board_id]["outputs"][channel - 1] = False
-                add_event("INFO", f"SIMULADO {do_code} -> OFF (sin hardware)", board_id)
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
+    )
 
     runtime["last_executed_at"] = datetime.now().isoformat()
     add_event("OK", f"Regla ejecutada: {rule_key}", 1)
@@ -1230,6 +1321,7 @@ def _evaluate_trigger_rule(
         "deactivated_modes": rule.get("deactivate_modes", []),
         "outputs_activated": rule.get("activate_outputs", []),
         "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "deactivate_outputs_temporary": _rule_deactivate_outputs_temporary(rule),
         "outputs_skipped_disconnected": skipped_disconnected,
         "timestamp": runtime["last_executed_at"],
     }
@@ -1307,6 +1399,10 @@ def _deactivate_rule_on_fall(
     mode_latches[trigger_code] = False
     current_mode = None
     _persist_current_mode_to_db()
+
+    _restore_temp_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware, origin=f"desactiva_flanco:{rule_key}"
+    )
 
     # Al desactivar por flanco OFF, soltamos las salidas que activó esta regla.
     for out_code in rule.get("activate_outputs", []):
@@ -1508,19 +1604,9 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             if 1 <= ch <= len(outs):
                 io_state[b]["outputs"][ch - 1] = True
 
-    for out_code in rule.get("deactivate_outputs", []):
-        b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            if not _write_output_if_connected(
-                b, ch, False, out_code=out_code, origin=f"forzado:{rule_key}"
-            ):
-                skipped_disconnected.append(out_code)
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = False
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=f"forzado:{rule_key}"
+    )
 
     if _rule_owns_operational_mode(rule):
         current_mode = rule_key
@@ -2321,10 +2407,22 @@ def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
     global current_mode
     if current_mode != rule_key:
         return {"cleared": False, "current_mode": current_mode}
+    rule = rules_config.get(rule_key) or {}
+    restored: List[str] = []
+    if rule:
+        restored = _restore_temp_deactivate_outputs(
+            rule, rule_key, True, origin=f"clear_mode:{rule_key}"
+        )
+        for out_code in rule.get("activate_outputs", []):
+            b, ch = _parse_out_code(out_code)
+            if io_state.get(b, {}).get("connected"):
+                _write_output_if_connected(
+                    b, ch, False, out_code=out_code, origin=f"clear_mode:{rule_key}"
+                )
     current_mode = None
     _persist_current_mode_to_db()
     add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
-    return {"cleared": True, "current_mode": None}
+    return {"cleared": True, "current_mode": None, "outputs_restored": restored}
 
 
 def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:

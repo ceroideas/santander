@@ -372,6 +372,8 @@ function RulesFormAssistant({
   const [wfDeactivate, setWfDeactivate] = useState([]);
   const [wfActOut, setWfActOut] = useState([]);
   const [wfDeactOut, setWfDeactOut] = useState([]);
+  /** Si true → JSON `deactivate_outputs_temporary`: al soltar la regla, restaura OUT que estaban ON. */
+  const [wfDeactTemporary, setWfDeactTemporary] = useState(false);
   const [wfEnabled, setWfEnabled] = useState(true);
   const [wfAuto, setWfAuto] = useState(true);
   const [wfType, setWfType] = useState("enclavamiento");
@@ -416,6 +418,9 @@ function RulesFormAssistant({
       activate_outputs: [...wfActOut],
       deactivate_outputs: [...wfDeactOut],
     };
+    if (wfDeactTemporary) {
+      rule.deactivate_outputs_temporary = true;
+    }
     if (wfType === "pulso_5_sg") {
       const n = parseInt(String(wfPulseSeconds).trim(), 10);
       rule.pulse_seconds = Number.isFinite(n) ? Math.min(300, Math.max(0, n)) : 0;
@@ -462,6 +467,7 @@ function RulesFormAssistant({
     setWfDeactOut(
       Array.isArray(r.deactivate_outputs) ? [...r.deactivate_outputs] : [],
     );
+    setWfDeactTemporary(Boolean(r.deactivate_outputs_temporary));
     setWfEnabled(r.enabled !== false);
     setWfAuto(r.auto_execute !== false);
     setWfType(typeof r.type === "string" ? r.type : "enclavamiento");
@@ -886,6 +892,27 @@ function RulesFormAssistant({
           <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
             Desactivar salidas (OUT → OFF)
           </span>
+          <label
+            style={{
+              marginLeft: "auto",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontSize: 11,
+              fontWeight: 600,
+              color: C.textSub,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+            title="Al soltar el trigger o desactivar la regla, vuelve a ON solo los OUT que ya estaban encendidos (p. ej. interfono)."
+          >
+            <input
+              type="checkbox"
+              checked={wfDeactTemporary}
+              onChange={(e) => setWfDeactTemporary(e.target.checked)}
+            />
+            Desactivar temporalmente
+          </label>
         </div>
         <div style={{ marginBottom: 10, minHeight: 28 }}>
           <ChipList
