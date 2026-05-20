@@ -20,9 +20,15 @@
   box-sizing: border-box;
 }
 
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
-  min-height: 100vh;
+}
+
+body {
+  overflow: hidden;
 }
 
 a {
@@ -31,12 +37,15 @@ a {
 }
 
 .coce-layout {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr);
+  overflow: hidden;
 }
 
 .coce-sidebar {
+  height: 100vh;
+  overflow: hidden;
   background: #111927;
   color: #cbd5e1;
   padding: 1rem 0.8rem;
@@ -91,11 +100,14 @@ a {
 .coce-main {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   min-width: 0;
   width: 100%;
+  overflow: hidden;
 }
 
 .coce-topbar {
+  flex-shrink: 0;
   background: #fff;
   border-bottom: 1px solid var(--surface2);
   padding: 0.9rem 1.25rem;
@@ -115,6 +127,10 @@ a {
 }
 
 .coce-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 1.1rem 1.25rem 1.5rem;
   width: 100%;
 }
@@ -572,10 +588,16 @@ th {
 @media (max-width: 980px) {
   .coce-layout {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
   .coce-sidebar {
+    height: auto;
     border-right: none;
     border-bottom: 1px solid #1f2a3d;
+  }
+  .coce-main {
+    height: 100%;
+    min-height: 0;
   }
 }
 
