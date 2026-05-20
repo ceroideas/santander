@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import type { PanelBoardState, PanelModeRule, Sucursal } from '../types';
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import type { PanelBoardState, PanelModeRule, Sucursal } from "../types";
 import {
   baseUrlFromSucursal,
   fetchCurrentModeV1,
@@ -9,8 +9,9 @@ import {
   loginPanelWeb,
   loginTabletV1,
   setModeRuleV1,
-} from '../api/branchClient';
-import { loadSucursales } from '../storage/sucursales';
+} from "../api/branchClient";
+import { loadSucursales } from "../storage/sucursales";
+import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 
 type LoadState = {
   modes: PanelModeRule[];
@@ -29,11 +30,86 @@ export function DashboardSucursal() {
   const [data, setData] = useState<LoadState | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
+  // Función para transformar "horario_esclusa" -> "Horario esclusa"
+  function formatModeName(key: string | null | undefined, fallback = "— ninguna regla activa —"): string {
+    if (!key) return fallback;
+    const withSpaces = key.replace(/_/g, " ");
+    return withSpaces.charAt(0).toUpperCase() + withSpaces.slice(1);
+  }
+
+  function DevicesIcon() {
+    return (
+      <svg
+        className="sucursal-card-icon"
+        viewBox="0 0 120 60"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden
+      >
+        <rect
+          x="4"
+          y="10"
+          width="52"
+          height="38"
+          rx="4"
+          stroke="currentColor"
+          strokeWidth="2.5"
+        />
+        <rect
+          x="10"
+          y="16"
+          width="40"
+          height="24"
+          rx="2"
+          fill="currentColor"
+          opacity="0.12"
+        />
+        <rect
+          x="22"
+          y="48"
+          width="16"
+          height="3"
+          rx="1"
+          fill="currentColor"
+          opacity="0.35"
+        />
+        <rect
+          x="16"
+          y="52"
+          width="28"
+          height="2"
+          rx="1"
+          fill="currentColor"
+          opacity="0.2"
+        />
+        <rect
+          x="68"
+          y="6"
+          width="28"
+          height="46"
+          rx="5"
+          stroke="currentColor"
+          strokeWidth="2.5"
+        />
+        <rect
+          x="72"
+          y="12"
+          width="20"
+          height="32"
+          rx="2"
+          fill="currentColor"
+          opacity="0.12"
+        />
+        <circle cx="80" cy="48" r="2" fill="currentColor" opacity="0.35" />
+      </svg>
+    );
+  }
+
   useEffect(() => {
     if (!id) return;
     const s = loadSucursales().find((x) => x.id === id);
     if (!s) {
-      navigate('/sucursales', { replace: true });
+      navigate("/sucursales", { replace: true });
       return;
     }
     setSucursal(s);
@@ -117,22 +193,48 @@ export function DashboardSucursal() {
   }
 
   const base = baseUrlFromSucursal(sucursal);
+  const estado = getSucursalEstado(sucursal);
+  const estadoLabel = SUCURSAL_ESTADO_LABELS[estado];
 
   return (
     <div className="content-view">
-      <header className="app-header">
-        <div>
-          <h1>{sucursal.nombre}</h1>
-          <span className="tag">{base}</span>
+      <header className="app-header app-header--sucursal">
+        <div className="app-header-start">
+          <div
+            style={{ width: "80px", height: "40px", color: "var(--accent)" }}
+          >
+            <DevicesIcon />
+          </div>
+          <div>
+            <h1>{sucursal.nombre}</h1>
+            <span className="tag">{base}</span>
+          </div>
         </div>
-        <div className="row-actions" style={{ marginTop: 0 }}>
-          <button type="button" className="btn btn-secondary" onClick={() => void refresh()} disabled={loading}>
-            {loading ? 'Actualizando…' : 'Actualizar'}
+
+        <div
+          className={`dashboard-sucursal-status dashboard-sucursal-status--${estado}`}
+          aria-label={`Estado: ${estadoLabel}`}
+        >
+          <span className="dashboard-sucursal-status-dot" aria-hidden />
+          <span>{estadoLabel}</span>
+        </div>
+
+        <div className="row-actions app-header-end">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
+            {loading ? "Actualizando…" : "Actualizar"}
           </button>
           <Link to="/sucursales" className="btn btn-ghost">
             Lista
           </Link>
-          <Link to={`/sucursales/editar/${sucursal.id}`} className="btn btn-ghost">
+          <Link
+            to={`/sucursales/editar/${sucursal.id}`}
+            className="btn btn-ghost"
+          >
             Editar
           </Link>
         </div>
@@ -143,114 +245,147 @@ export function DashboardSucursal() {
       {!data && !error && loading && <p>Conectando con el sistema local…</p>}
 
       {data && (
-        <>
-          <div className="card">
-            <h2>Modo activo (panel)</h2>
-            <p className={data.currentMode ? 'mode-active' : undefined} style={{ margin: 0, fontSize: '1.1rem' }}>
-              {data.currentMode ?? '— ninguna regla activa —'}
-            </p>
+        <div className="dashboard-content-wrapper">
+          {/* Fila de KPIs */}
+          <div className="kpi-grid">
+            <article className="kpi-card" style={{ borderLeft: "4px solid var(--accent)" }}>
+              <p>Modo activo en panel</p>
+              <h3 style={{ color: data.currentMode ? "var(--text)" : "var(--muted)" }}>
+                {formatModeName(data.currentMode)}
+              </h3>
+            </article>
+            <article className="kpi-card" style={{ borderLeft: "4px solid var(--ok)" }}>
+              <p>Reglas habilitadas</p>
+              <h3>
+                {data.modes.filter(m => m.enabled).length} <small style={{fontSize:"0.8rem", color:"var(--muted)", fontWeight:"normal"}}>de {data.modes.length}</small>
+              </h3>
+            </article>
+            <article className="kpi-card" style={{ borderLeft: "4px solid #0f4c81" }}>
+              <p>Módulos ETD8A12</p>
+              <h3>
+                {data.boards.length} <small style={{fontSize:"0.8rem", color:"var(--muted)", fontWeight:"normal"}}>conectados</small>
+              </h3>
+            </article>
           </div>
 
-          <div className="card">
-            <h2>Modos / reglas disponibles</h2>
-            <p style={{ color: 'var(--muted)', fontSize: '0.85rem', marginTop: 0 }}>
-              Lista desde <code>GET /api/v1/modes</code>. Activar ejecuta{' '}
-              <code>POST /api/v1/set_mode</code> con <code>set_rule</code> y <code>active: true</code>.
-            </p>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Clave</th>
-                    <th>Tipo</th>
-                    <th>Habilitada</th>
-                    <th>Activa ahora</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.modes.map((m) => {
-                    const isCurrent = data.currentMode === m.key;
-                    return (
-                      <tr key={m.key}>
-                        <td>
-                          <code>{m.key}</code>
-                        </td>
-                        <td>{m.type ?? '—'}</td>
-                        <td>
-                          {m.enabled ? (
-                            <span className="badge badge-ok">Sí</span>
-                          ) : (
-                            <span className="badge badge-off">No</span>
-                          )}
-                        </td>
-                        <td>{isCurrent ? <span className="badge badge-ok">Sí</span> : '—'}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
-                            style={{ fontSize: '0.8rem', padding: '0.3rem 0.6rem' }}
-                            disabled={!m.enabled || busyKey !== null}
-                            onClick={() => void activateMode(m.key)}
-                          >
-                            {busyKey === m.key ? '…' : 'Activar'}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="card">
-            <h2>Placas (módulos ETD8A12)</h2>
-            {!sucursal.usuarioPanel?.trim() || !sucursal.passwordPanel ? (
-              <p style={{ color: 'var(--muted)', margin: 0 }}>
-                Configura usuario y contraseña del <strong>panel web</strong> en la ficha de la sucursal para
-                cargar <code>/api/panel/status</code>.
-              </p>
-            ) : data.panelError ? (
-              <div className="alert alert-error">Panel: {data.panelError}</div>
-            ) : data.panelOk && data.boards.length === 0 ? (
-              <p style={{ margin: 0 }}>No hay datos de placas en la respuesta.</p>
-            ) : (
+          <div className="dashboard-panels-grid">
+            {/* Panel de Modos */}
+            <div className="card dashboard-panel">
+              <div className="panel-header">
+                <h2>Modos y reglas disponibles</h2>
+                <p className="panel-subtitle">
+                  Ejecución remota vía <code>POST /api/v1/set_mode</code>
+                </p>
+              </div>
               <div className="table-wrap">
-                <table>
+                <table className="data-table">
                   <thead>
                     <tr>
-                      <th>ID</th>
-                      <th>Nombre</th>
-                      <th>Modbus</th>
-                      <th>Conexión</th>
+                      <th>Clave</th>
+                      <th>Tipo</th>
+                      <th style={{ textAlign: "center" }}>Habilitada</th>
+                      <th style={{ textAlign: "center" }}>Activa ahora</th>
+                      <th style={{ textAlign: "right" }}>Acción</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {data.boards.map(({ id: bid, data: b }) => (
-                      <tr key={bid}>
-                        <td>{bid}</td>
-                        <td>{b.config?.name ?? '—'}</td>
-                        <td>
-                          <small style={{ color: 'var(--muted)' }}>
-                            {b.config?.host ?? '—'}:{b.config?.port ?? '—'} (slave {b.config?.slave_id ?? '—'})
-                          </small>
-                        </td>
-                        <td>
-                          {b.connected ? (
-                            <span className="badge badge-ok">Conectada</span>
-                          ) : (
-                            <span className="badge badge-off">No</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
+                    {data.modes.map((m) => {
+                      const isCurrent = data.currentMode === m.key;
+                      return (
+                        <tr key={m.key} className={isCurrent ? "row-highlight" : ""}>
+                          <td style={{ fontWeight: 500 }}>{formatModeName(m.key)} <br/><small className="text-muted" style={{ fontWeight: "normal", fontSize: "0.8rem" }}>{m.key}</small></td>
+                          <td className="text-muted">{formatModeName(m.type, "—")}</td>
+                          <td style={{ textAlign: "center" }}>
+                            {m.enabled ? (
+                              <span className="badge badge-ok">Sí</span>
+                            ) : (
+                              <span className="badge badge-off">No</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {isCurrent ? (
+                              <span className="badge badge-ok">Activa</span>
+                            ) : (
+                              <span className="text-muted">—</span>
+                            )}
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              className={isCurrent ? "btn btn-ghost btn-sm" : "btn btn-primary btn-sm"}
+                              disabled={!m.enabled || busyKey !== null || isCurrent}
+                              onClick={() => void activateMode(m.key)}
+                            >
+                              {busyKey === m.key ? "Activando…" : isCurrent ? "En uso" : "Activar"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
-            )}
+            </div>
+
+            {/* Panel de Placas */}
+            <div className="card dashboard-panel">
+              <div className="panel-header">
+                <h2>Hardware (Placas ETD8A12)</h2>
+                <p className="panel-subtitle">
+                  Estado de hardware local vía <code>/api/panel/status</code>
+                </p>
+              </div>
+              
+              {!sucursal.usuarioPanel?.trim() || !sucursal.passwordPanel ? (
+                <div className="empty-state">
+                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: "var(--muted)", marginBottom: "1rem" }}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                  <p>Faltan credenciales del panel web.</p>
+                  <Link to={`/sucursales/editar/${sucursal.id}`} className="btn btn-ghost btn-sm" style={{ marginTop: "0.5rem" }}>Configurar credenciales</Link>
+                </div>
+              ) : data.panelError ? (
+                <div className="alert alert-error" style={{ margin: "1rem" }}>Panel: {data.panelError}</div>
+              ) : data.panelOk && data.boards.length === 0 ? (
+                <div className="empty-state">
+                  <p>No se han detectado placas configuradas.</p>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>ID</th>
+                        <th>Nombre / Ubicación</th>
+                        <th>Conexión Modbus</th>
+                        <th style={{ textAlign: "center" }}>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.boards.map(({ id: bid, data: b }) => (
+                        <tr key={bid}>
+                          <td style={{ fontWeight: 600 }}>#{bid}</td>
+                          <td>{b.config?.name ?? <span className="text-muted">Sin nombre</span>}</td>
+                          <td className="text-muted" style={{ fontSize: "0.85rem" }}>
+                            {b.config?.host ?? "—"}:{b.config?.port ?? "—"} <br/>
+                            <span>Esclavo: {b.config?.slave_id ?? "—"}</span>
+                          </td>
+                          <td style={{ textAlign: "center" }}>
+                            {b.connected ? (
+                              <span className="badge badge-ok">Conectada</span>
+                            ) : (
+                              <span className="badge badge-off">Offline</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   );
