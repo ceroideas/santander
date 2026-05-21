@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     # el trigger sigue el IN efectivo del panel (override tristate, puede sin lectura previa).
     panel_rules_triggers_use_physical_inputs: bool = True
 
+    # Segundos de espera antes de volver a ON los bulones tras `deactivate_outputs_temporary` (0 = al instante).
+    panel_temp_deactivate_restore_delay_seconds: int = 3
+
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)
     # Por defecto: carpeta hermana frontend/dist (repo con backend/ y frontend/).
     # Si en el servidor solo copias dist a backend/static, define STATIC_DIR=./static

@@ -818,16 +818,24 @@ def _default_rule_runtime(rule_key: str) -> dict:
             "pulse_until": None,
             "last_follow_on": False,
             "temp_deact_snapshot": {},
+            "temp_deact_restore_at": None,
         }
     rules_runtime[rule_key].setdefault("pulse_until", None)
     rules_runtime[rule_key].setdefault("last_follow_on", False)
     rules_runtime[rule_key].setdefault("temp_deact_snapshot", {})
+    rules_runtime[rule_key].setdefault("temp_deact_restore_at", None)
     return rules_runtime[rule_key]
 
 
 def _rule_deactivate_outputs_temporary(rule: dict) -> bool:
     """Si True, al soltar la regla se restauran solo los OUT que estaban ON antes de forzarlos a OFF."""
     return bool(rule.get("deactivate_outputs_temporary"))
+
+
+def _cancel_pending_temp_deactivate_restore(rule_key: str) -> None:
+    runtime = rules_runtime.get(rule_key)
+    if runtime is not None:
+        runtime["temp_deact_restore_at"] = None
 
 
 def _read_output_cached(board_id: int, channel: int) -> bool:
@@ -841,6 +849,7 @@ def _snapshot_temp_deactivate_outputs(rule: dict, rule_key: str) -> None:
     """Guarda en runtime qué OUT de deactivate_outputs estaban ON antes de apagarlos."""
     if not _rule_deactivate_outputs_temporary(rule):
         return
+    _cancel_pending_temp_deactivate_restore(rule_key)
     runtime = _default_rule_runtime(rule_key)
     snap: Dict[str, bool] = {}
     for do_code in rule.get("deactivate_outputs") or []:
@@ -864,12 +873,27 @@ def _restore_temp_deactivate_outputs(
     apply_outputs_to_hardware: bool,
     *,
     origin: str,
+    force_immediate: bool = False,
 ) -> List[str]:
     """Vuelve a ON los OUT que estaban ON en el snapshot (desactivación temporal)."""
     if not _rule_deactivate_outputs_temporary(rule):
         return []
-    runtime = rules_runtime.get(rule_key) or {}
+    runtime = _default_rule_runtime(rule_key)
     snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
+    if not any(snap.values()):
+        _cancel_pending_temp_deactivate_restore(rule_key)
+        return []
+    if not force_immediate:
+        try:
+            delay = int(settings.panel_temp_deactivate_restore_delay_seconds)
+        except (TypeError, ValueError):
+            delay = 0
+        delay = max(0, min(120, delay))
+        if delay > 0:
+            runtime["temp_deact_restore_at"] = (
+                datetime.now() + timedelta(seconds=delay)
+            ).isoformat()
+            return []
     restored: List[str] = []
     for do_code, was_on in snap.items():
         if not was_on:
@@ -888,6 +912,7 @@ def _restore_temp_deactivate_outputs(
                 io_state[board_id]["outputs"][channel - 1] = True
                 restored.append(do_code)
     _clear_temp_deactivate_snapshot(rule_key)
+    _cancel_pending_temp_deactivate_restore(rule_key)
     if restored:
         add_event(
             "INFO",
@@ -895,6 +920,34 @@ def _restore_temp_deactivate_outputs(
             1,
         )
     return restored
+
+
+def _process_pending_temp_deactivate_restores(
+    apply_outputs_to_hardware: bool = True,
+) -> int:
+    """Ejecuta restauraciones diferidas cuyo plazo ya venció."""
+    now = datetime.now()
+    done = 0
+    for rule_key, runtime in list(rules_runtime.items()):
+        at_str = runtime.get("temp_deact_restore_at")
+        if not at_str:
+            continue
+        at_dt = _parse_iso_datetime(at_str)
+        if at_dt is None or now < at_dt:
+            continue
+        rule = rules_config.get(rule_key)
+        if not rule:
+            runtime["temp_deact_restore_at"] = None
+            continue
+        _restore_temp_deactivate_outputs(
+            rule,
+            rule_key,
+            apply_outputs_to_hardware,
+            origin=f"restore_delayed:{rule_key}",
+            force_immediate=True,
+        )
+        done += 1
+    return done
 
 
 def _pulse_seconds(rule: dict) -> int:
@@ -1451,6 +1504,9 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
         if board_id in io_state and io_state[board_id]["connected"]:
             with _board_modbus_lock(board_id):
                 _read_all_io(board_id, _modbus_lock_held=True)
+    pending_restores = _process_pending_temp_deactivate_restores(
+        apply_outputs_to_hardware=True
+    )
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
             continue
@@ -1484,6 +1540,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
         "checked_rules": checked,
         "executed_rules": executed,
         "deactivated_rules": deactivated,
+        "pending_temp_restores": pending_restores,
         "errors": errors,
         "error_messages": error_messages[:10],
         "timestamp": datetime.now().isoformat(),
