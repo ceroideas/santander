@@ -324,6 +324,15 @@ function channelIoTitle(kind, index, channel, opts = {}) {
   return base;
 }
 
+function buildIoOptionLabel(mod, ch, kind, index) {
+  const board = mod.name || `Placa ${mod.id}`;
+  const name = (ch.channel_name || "").trim();
+  if (name) return `${board} — ${name}`;
+  const tag = ch.label ? `${ch.label} · ` : "";
+  const io = kind === "input" ? `IN${index + 1}` : `OUT${index + 1}`;
+  return `${board} · ${tag}${io}`;
+}
+
 function buildIoOptions(moduleList) {
   const ins = [];
   const outs = [];
@@ -331,20 +340,16 @@ function buildIoOptions(moduleList) {
     const yy = String(mod.id).padStart(2, "0");
     (mod.inputs || []).forEach((ch, idx) => {
       const zz = String(idx + 1).padStart(2, "0");
-      const code = `IN_${yy}_${zz}`;
-      const tag = ch.label ? `${ch.label} · ` : "";
       ins.push({
-        code,
-        label: `${mod.name || `Placa ${mod.id}`} · ${tag}IN${idx + 1}`,
+        code: `IN_${yy}_${zz}`,
+        label: buildIoOptionLabel(mod, ch, "input", idx),
       });
     });
     (mod.outputs || []).forEach((ch, idx) => {
       const zz = String(idx + 1).padStart(2, "0");
-      const code = `OUT_${yy}_${zz}`;
-      const tag = ch.label ? `${ch.label} · ` : "";
       outs.push({
-        code,
-        label: `${mod.name || `Placa ${mod.id}`} · ${tag}OUT${idx + 1}`,
+        code: `OUT_${yy}_${zz}`,
+        label: buildIoOptionLabel(mod, ch, "output", idx),
       });
     });
   }
