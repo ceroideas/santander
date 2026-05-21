@@ -77,6 +77,8 @@ const TABS = [
   "Definición placas",
   "Configuración pulsadores",
 ];
+const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
+
 const IN_PLACEHOLDERS = Array.from(
   { length: 12 },
   (_, i) => `0x${(0x0080 + i).toString(16).toUpperCase().padStart(4, "0")}`,
@@ -1799,8 +1801,8 @@ export default function ETD8A12Panel() {
       }
     };
     poll(true);
-    // ~7.5 s: menos solicitudes concurrentes al backend; pestaña oculta no fuerza Modbus.
-    const iv = setInterval(() => poll(false), 7500);
+    // ~5 s: estado del panel; pestaña oculta no fuerza Modbus.
+    const iv = setInterval(() => poll(false), 5000);
     return () => clearInterval(iv);
   }, []);
 
@@ -1845,7 +1847,7 @@ export default function ETD8A12Panel() {
   }, [rulesJson]);
 
   useEffect(() => {
-    if (!serverOnline) return;
+    if (!serverOnline || tab !== HISTORICO_TAB_INDEX) return;
     const pollEvents = async () => {
       try {
         const d = await apiFetch("/events?limit=500");
@@ -1857,7 +1859,7 @@ export default function ETD8A12Panel() {
     pollEvents();
     const iv = setInterval(pollEvents, 3000);
     return () => clearInterval(iv);
-  }, [serverOnline]);
+  }, [serverOnline, tab]);
 
   useEffect(() => {
     logEnd.current?.scrollIntoView({ behavior: "smooth" });

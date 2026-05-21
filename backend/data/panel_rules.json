@@ -720,7 +720,9 @@
     "auto_execute": true,
     "type": "pulso_5_sg",
     "trigger": "IN_03_08",
-    "blocked_if_active": [],
+    "blocked_if_active": [
+      "IN_01_05"
+    ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
@@ -754,7 +756,9 @@
     "auto_execute": true,
     "type": "pulso_5_sg",
     "trigger": "IN_02_08",
-    "blocked_if_active": [],
+    "blocked_if_active": [
+      "IN_01_05"
+    ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
