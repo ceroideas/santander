@@ -49,11 +49,17 @@ def parse_smcse_code(code: str) -> Optional[Tuple[str, int, int]]:
     return kind, module_id, slot_index
 
 
-def smcse_to_in_out_codes(kind: str, module_id: int, slot_index: int) -> Tuple[str, str]:
-    """Códigos usados en reglas JSON: IN_MM_SS y OUT_MM_SS."""
+def format_channel_label(kind: str, module_id: int, slot_index: int) -> str:
+    """Código guardado en `panel_module_channels.label` y reglas JSON: IN_MM_SS / OUT_MM_SS."""
     prefix = "IN" if kind == "input" else "OUT"
-    code = f"{prefix}_{module_id:02d}_{slot_index:02d}"
-    return (code, format_smcse_code(kind, module_id, slot_index)) if kind == "input" else (format_smcse_code(kind, module_id, slot_index), code)
+    return f"{prefix}_{module_id:02d}_{slot_index:02d}"
+
+
+def smcse_to_in_out_codes(kind: str, module_id: int, slot_index: int) -> Tuple[str, str]:
+    """Par (IN_MM_SS, SMCSE_…) o (SMCSE_…, OUT_MM_SS) según tipo de canal."""
+    io = format_channel_label(kind, module_id, slot_index)
+    smcse = format_smcse_code(kind, module_id, slot_index)
+    return (io, smcse) if kind == "input" else (smcse, io)
 
 
 # Nombres por canal según ENTRADAS Y SALIDAS.xlsx / CORRELACION_ENTRADAS_SALIDAS.md
@@ -128,7 +134,7 @@ def _default_channel_name(module_id: int, kind: str, slot_index: int) -> Optiona
 
 def sync_channel_names_from_catalog(*, only_if_empty: bool = True) -> int:
     """
-    Rellena `channel_name` y `label` (código SMCSE) según catálogo y placa/canal.
+    Rellena `channel_name` y `label` (IN_MM_SS / OUT_MM_SS) según catálogo y placa/canal.
     Devuelve número de filas actualizadas.
     """
     ensure_panel_modules_schema()
@@ -144,13 +150,13 @@ def sync_channel_names_from_catalog(*, only_if_empty: bool = True) -> int:
             mid = int(module_id)
             k = str(kind)
             slot = int(slot_index)
-            smcse = format_smcse_code(k, mid, slot)
+            io_label = format_channel_label(k, mid, slot)
             catalog_name = _default_channel_name(mid, k, slot)
             sets: List[str] = []
             vals: List[Any] = []
             if not only_if_empty or not current_label:
                 sets.append("label = ?")
-                vals.append(smcse)
+                vals.append(io_label)
             if catalog_name and (not only_if_empty or not current_name):
                 sets.append("channel_name = ?")
                 vals.append(catalog_name)
@@ -245,16 +251,16 @@ def _row_channel(row: Tuple[Any, ...]) -> dict:
     kind = str(row[2])
     slot_index = int(row[3])
     label = row[4]
-    smcse = label or format_smcse_code(kind, module_id, slot_index)
     in_code, out_code = smcse_to_in_out_codes(kind, module_id, slot_index)
+    io_code = in_code if kind == "input" else out_code
     return {
         "id": row[0],
         "module_id": module_id,
         "kind": kind,
         "slot_index": slot_index,
-        "label": label,
-        "smcse_code": smcse,
-        "io_code": in_code if kind == "input" else out_code,
+        "label": label or io_code,
+        "smcse_code": format_smcse_code(kind, module_id, slot_index),
+        "io_code": io_code,
         "channel_name": row[5],
         "address": row[6],
         "open_cmd": row[7],
@@ -557,7 +563,7 @@ def seed_default_modules_if_empty() -> None:
                     (
                         mid,
                         slot,
-                        format_smcse_code("input", mid, slot),
+                        format_channel_label("input", mid, slot),
                         _default_channel_name(mid, "input", slot),
                         DEFAULT_REG_INPUT_START + i,
                     ),
@@ -573,7 +579,7 @@ def seed_default_modules_if_empty() -> None:
                     (
                         mid,
                         slot,
-                        format_smcse_code("output", mid, slot),
+                        format_channel_label("output", mid, slot),
                         _default_channel_name(mid, "output", slot),
                         DEFAULT_REG_OUTPUT_START + i,
                     ),

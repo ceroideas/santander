@@ -310,27 +310,31 @@ function formatEventDateTime(e) {
   return e?.ts || "";
 }
 
-function channelIoTitle(kind, index, channel, opts = {}) {
-  const tag = kind === "input" ? "IN" : "OUT";
-  const num = index + 1;
-  const name = (channel?.channel_name || "").trim();
-  let base;
-  if (name) base = `${tag}${num}: ${name}`;
-  else {
-    const code = channel?.io_code || channel?.smcse_code || channel?.label;
-    base = code ? `${tag}${num} (${code})` : `${tag}${num}`;
-  }
-  if (opts.activeByOverride) base += " (override)";
-  return base;
+function formatIoSlot(kind, index, { padded = false } = {}) {
+  const n = index + 1;
+  const prefix = kind === "input" ? "IN" : "OUT";
+  return padded ? `${prefix}${String(n).padStart(2, "0")}` : `${prefix}${n}`;
+}
+
+function formatBoardLabel(mod) {
+  return (mod.name || `Placa ${mod.id}`).replace(/\s*[—–]\s*/g, " - ");
 }
 
 function buildIoOptionLabel(mod, ch, kind, index) {
-  const board = mod.name || `Placa ${mod.id}`;
+  const board = formatBoardLabel(mod);
   const name = (ch.channel_name || "").trim();
-  if (name) return `${board} — ${name}`;
-  const tag = ch.label ? `${ch.label} · ` : "";
-  const io = kind === "input" ? `IN${index + 1}` : `OUT${index + 1}`;
-  return `${board} · ${tag}${io}`;
+  const slot = formatIoSlot(kind, index, { padded: Boolean(name) });
+  if (name) return `${board} - ${name} - ${slot}`;
+  return `${board} - ${slot}`;
+}
+
+function channelIoTitle(kind, index, channel, opts = {}) {
+  const name = (channel?.channel_name || "").trim();
+  let base = name
+    ? `${formatIoSlot(kind, index, { padded: true })}: ${name}`
+    : formatIoSlot(kind, index, { padded: false });
+  if (opts.activeByOverride) base += " (override)";
+  return base;
 }
 
 function buildIoOptions(moduleList) {
@@ -356,7 +360,7 @@ function buildIoOptions(moduleList) {
   return { ins, outs };
 }
 
-function ChipList({ items, onRemove, C }) {
+function ChipList({ items, onRemove, C, labelByCode }) {
   if (!items.length)
     return (
       <span
@@ -380,12 +384,12 @@ function ChipList({ items, onRemove, C }) {
             borderRadius: 8,
             background: C.white,
             border: `1px solid ${C.border}`,
-            fontFamily: "Consolas, monospace",
+            fontFamily: labelByCode?.[code] ? "inherit" : "Consolas, monospace",
             color: C.textMid,
             boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
           }}
         >
-          {code}
+          {labelByCode?.[code] || code}
           <button
             type="button"
             onClick={() => onRemove(code)}
@@ -419,6 +423,11 @@ function RulesFormAssistant({
   setSelectedMode,
 }) {
   const { ins, outs } = useMemo(() => buildIoOptions(moduleList), [moduleList]);
+  const ioLabelByCode = useMemo(() => {
+    const m = {};
+    for (const o of [...ins, ...outs]) m[o.code] = o.label;
+    return m;
+  }, [ins, outs]);
   const [wfName, setWfName] = useState("");
   const [wfTrigger, setWfTrigger] = useState("");
   const [wfBlocked, setWfBlocked] = useState([]);
@@ -718,7 +727,7 @@ function RulesFormAssistant({
           >
             {ins.map((o) => (
               <option key={o.code} value={o.code}>
-                {o.label} ({o.code})
+                {o.label}
               </option>
             ))}
           </select>
@@ -820,6 +829,7 @@ function RulesFormAssistant({
             items={wfBlocked}
             onRemove={(c) => setWfBlocked(wfBlocked.filter((x) => x !== c))}
             C={C}
+            labelByCode={ioLabelByCode}
           />
         </div>
         <select
@@ -865,6 +875,7 @@ function RulesFormAssistant({
             items={wfDeactivate}
             onRemove={(c) => setWfDeactivate(wfDeactivate.filter((x) => x !== c))}
             C={C}
+            labelByCode={ioLabelByCode}
           />
         </div>
         <select
@@ -908,6 +919,7 @@ function RulesFormAssistant({
             items={wfActOut}
             onRemove={(c) => setWfActOut(wfActOut.filter((x) => x !== c))}
             C={C}
+            labelByCode={ioLabelByCode}
           />
         </div>
         <select
@@ -972,6 +984,7 @@ function RulesFormAssistant({
             items={wfDeactOut}
             onRemove={(c) => setWfDeactOut(wfDeactOut.filter((x) => x !== c))}
             C={C}
+            labelByCode={ioLabelByCode}
           />
         </div>
         <select
