@@ -530,19 +530,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_03_01",
     "blocked_if_active": [
-      "OUT_02_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_02_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_exterior_puerta_oficina_esclusa": {
     "enabled": true,
@@ -550,19 +551,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_03_02",
     "blocked_if_active": [
-      "OUT_02_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_02_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_03_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_interior_puerta_calle_esclusa": {
     "enabled": true,
@@ -570,19 +572,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_02_01",
     "blocked_if_active": [
-      "OUT_03_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_03_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "radares_exterior_puerta_calle_esclusa": {
     "enabled": true,
@@ -590,19 +593,20 @@
     "type": "pulso_5_sg",
     "trigger": "IN_02_02",
     "blocked_if_active": [
-      "OUT_03_04",
       "IN_01_01",
       "IN_01_03",
       "IN_01_04",
       "IN_01_05",
       "IN_01_06",
-      "IN_01_07"
+      "IN_01_07",
+      "IN_03_04"
     ],
     "deactivate_modes": [],
     "activate_outputs": [
       "OUT_02_07"
     ],
-    "deactivate_outputs": []
+    "deactivate_outputs": [],
+    "pulse_seconds": 0
   },
   "pulsador_emergencia_verde_puerta_oficina": {
     "enabled": true,
@@ -707,7 +711,9 @@
     "deactivate_outputs": [
       "OUT_03_01",
       "OUT_03_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 0
   },
   "interfono_puerta_oficina_exterior": {
     "enabled": true,
@@ -722,7 +728,9 @@
     "deactivate_outputs": [
       "OUT_03_01",
       "OUT_03_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 0
   },
   "interfono_puerta_calle_interior": {
     "enabled": true,
@@ -737,7 +745,9 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 0
   },
   "interfono_puerta_calle_exterior": {
     "enabled": true,
@@ -752,7 +762,9 @@
     "deactivate_outputs": [
       "OUT_02_01",
       "OUT_02_02"
-    ]
+    ],
+    "deactivate_outputs_temporary": true,
+    "pulse_seconds": 0
   },
   "llave_emergencia_puerta_oficina": {
     "enabled": true,
