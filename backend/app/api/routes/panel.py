@@ -182,6 +182,8 @@ def _sync_runtime_from_db() -> None:
             (o_prev[i] if i < len(o_prev) and o_prev[i] in (None, True, False) else None) for i in range(n_in)
         ]
 mode_latches: Dict[str, bool] = {}
+# IN trigger de reglas enclavamiento → clave de modo (p. ej. IN_01_05 → horario_cerrado).
+in_trigger_to_mode: Dict[str, str] = {}
 current_mode: Optional[str] = None
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
@@ -213,9 +215,17 @@ background_auto_rules_last_error: Optional[str] = None
 
 
 def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
-    """Asegura entradas en mode_latches para cada código IN referenciado en las reglas."""
-    for _rk, rule in rules.items():
+    """Asegura entradas en mode_latches y el mapa IN trigger → modo enclavamiento."""
+    global in_trigger_to_mode
+    trigger_map: Dict[str, str] = {}
+    for rk, rule in rules.items():
         tc = rule.get("trigger")
+        if (
+            rule.get("type") == "enclavamiento"
+            and isinstance(tc, str)
+            and tc.startswith("IN_")
+        ):
+            trigger_map[tc] = rk
         if isinstance(tc, str) and tc.startswith("IN_"):
             mode_latches.setdefault(tc, False)
         for code in rule.get("blocked_if_active") or []:
@@ -224,6 +234,7 @@ def _sync_mode_latches_from_rules(rules: Dict[str, dict]) -> None:
         for code in rule.get("deactivate_modes") or []:
             if isinstance(code, str) and code.startswith("IN_"):
                 mode_latches.setdefault(code, False)
+    in_trigger_to_mode = trigger_map
 
 
 def _sync_rules_runtime(rules: Dict[str, dict]) -> None:
@@ -802,6 +813,11 @@ def _blocked_signal_active(
         if not 1 <= channel <= len(outs):
             return False
         return bool(outs[channel - 1])
+    mode_key = in_trigger_to_mode.get(code)
+    if mode_key is not None:
+        # IN de modo enclavamiento: solo bloquea si ese modo es el operativo vigente
+        # (última activación), no por cable suelto con otro modo en current_mode.
+        return current_mode == mode_key
     return _read_input_effective(
         code,
         use_hardware_if_no_override=use_hardware_if_no_override,
@@ -1270,6 +1286,41 @@ def _evaluate_pulse_5_sg_rule(
     }
 
 
+def _trigger_activated_by_panel_override(trigger_code: str, *, manual: bool = False) -> bool:
+    """True si el modo se activó por panel (override ON en el trigger o ejecución manual)."""
+    if manual:
+        return True
+    board_id, channel = _parse_in_code(trigger_code)
+    return input_overrides[board_id][channel - 1] is True
+
+
+def _apply_enclavamiento_mode_activation(
+    rule: dict,
+    trigger_code: str,
+    *,
+    activated_by_panel_override: bool,
+) -> None:
+    """
+    Tras activar un modo enclavamiento (prioridad = último current_mode asignado):
+    - hardware: override null en trigger y deactivate_modes (estado real en panel).
+    - panel: override ON en trigger y OFF en deactivate_modes.
+    """
+    tb, tch = _parse_in_code(trigger_code)
+    mode_latches.setdefault(trigger_code, False)
+    mode_latches[trigger_code] = True
+    if activated_by_panel_override:
+        input_overrides[tb][tch - 1] = True
+    else:
+        input_overrides[tb][tch - 1] = None
+    for code in rule.get("deactivate_modes", []):
+        mode_latches.setdefault(code, False)
+        mode_latches[code] = False
+        board_id, channel = _parse_in_code(code)
+        input_overrides[board_id][channel - 1] = (
+            False if activated_by_panel_override else None
+        )
+
+
 def _evaluate_trigger_rule(
     rule_key: str,
     manual: bool = False,
@@ -1341,13 +1392,10 @@ def _evaluate_trigger_rule(
             "trigger_input_active": trigger_active,
         }
 
-    mode_latches.setdefault(trigger_code, False)
-    mode_latches[trigger_code] = True
-    for code in rule.get("deactivate_modes", []):
-        mode_latches.setdefault(code, False)
-        mode_latches[code] = False
-        board_id, channel = _parse_in_code(code)
-        input_overrides[board_id][channel - 1] = False
+    by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
+    _apply_enclavamiento_mode_activation(
+        rule, trigger_code, activated_by_panel_override=by_panel
+    )
     if _rule_owns_operational_mode(rule):
         current_mode = rule_key
         _persist_current_mode_to_db()
@@ -1600,10 +1648,10 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         }
 
     if rule.get("type") == PULSE_5_SG_TYPE:
-        for in_code in rule.get("deactivate_modes", []):
-            b, ch = _parse_in_code(in_code)
-            input_overrides[b][ch - 1] = False
-            mode_latches[in_code] = False
+        trigger_code = rule.get("trigger") or "IN_01_01"
+        _apply_enclavamiento_mode_activation(
+            rule, trigger_code, activated_by_panel_override=True
+        )
         _pulse_apply_deactivate_outputs(rule, apply_outputs_to_hardware, rule_key=rule_key)
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         rt = _default_rule_runtime(rule_key)
@@ -1644,16 +1692,10 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "mode": current_mode,
         }
 
-    trigger_code = rule.get("trigger")
-    if trigger_code:
-        b, ch = _parse_in_code(trigger_code)
-        input_overrides[b][ch - 1] = True
-        mode_latches[trigger_code] = True
-
-    for in_code in rule.get("deactivate_modes", []):
-        b, ch = _parse_in_code(in_code)
-        input_overrides[b][ch - 1] = False
-        mode_latches[in_code] = False
+    trigger_code = rule.get("trigger") or "IN_01_01"
+    _apply_enclavamiento_mode_activation(
+        rule, trigger_code, activated_by_panel_override=True
+    )
 
     skipped_disconnected: List[str] = []
     for out_code in rule.get("activate_outputs", []):
