@@ -615,6 +615,271 @@ th {
   gap: 1.25rem;
 }
 
+.device-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 720px) {
+  .device-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.device-card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding: 1.25rem 1.35rem;
+  padding-top: 2.75rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.1),
+    0 1px 3px rgba(15, 23, 42, 0.06);
+}
+
+.device-card-actions {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  z-index: 1;
+}
+
+.device-card-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.device-card-restart-btn {
+  background: #fff;
+  color: var(--warn);
+  border: 1px solid #fcd34d;
+}
+.device-card-restart-btn:hover {
+  background: #fffbeb;
+  color: #92400e;
+  border-color: #fbbf24;
+}
+
+.device-card-icon {
+  flex-shrink: 0;
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.device-card-icon svg {
+  width: 56px;
+  height: auto;
+}
+
+.device-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.device-card-title {
+  margin: 0 0 0.85rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.device-card-meta {
+  margin: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.device-card-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.device-card-row dt {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.device-card-row dd {
+  margin: 0;
+}
+
+.device-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.device-card-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.device-card-status--operativo {
+  color: var(--ok);
+}
+
+.device-card-status--no_operativo {
+  color: var(--warn);
+}
+
+.device-card-status--apagado {
+  color: var(--danger);
+}
+
+.device-card-version {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.divider {
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--surface2);
+}
+
+.doors-section {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.doors-section-header {
+  margin-bottom: 1rem;
+}
+
+.doors-section-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text);
+}
+
+.doors-section-header .panel-subtitle {
+  margin: 0.35rem 0 0;
+}
+
+.doors-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+@media (max-width: 720px) {
+  .doors-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.door-status-card {
+  display: flex;
+  align-items: center;
+  gap: 1.15rem;
+  padding: 1.15rem 1.25rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.08),
+    0 1px 3px rgba(15, 23, 42, 0.05);
+  border-left: 4px solid var(--surface2);
+}
+
+.door-status-card--abierta {
+  border-left-color: var(--ok);
+}
+
+.door-status-card--cerrada {
+  border-left-color: #64748b;
+}
+
+.door-status-card--bloqueada {
+  border-left-color: var(--warn);
+}
+
+.door-status-card--emergencia {
+  border-left-color: var(--danger);
+}
+
+.door-status-card-icon {
+  flex-shrink: 0;
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+  background: #f8fafc;
+  border-radius: 10px;
+}
+
+.door-status-card-icon svg {
+  width: 52px;
+  height: auto;
+}
+
+.door-status-card-title {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.door-status-card-label {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.door-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.door-status-badge-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.door-status-badge--abierta {
+  color: var(--ok);
+}
+
+.door-status-badge--cerrada {
+  color: #475569;
+}
+
+.door-status-badge--bloqueada {
+  color: var(--warn);
+}
+
+.door-status-badge--emergencia {
+  color: var(--danger);
+}
+
 .dashboard-panels-grid {
   display: grid;
   gap: 1.25rem;
