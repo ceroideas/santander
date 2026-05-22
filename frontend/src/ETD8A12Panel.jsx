@@ -1647,7 +1647,11 @@ export default function ETD8A12Panel() {
     color_g: 220,
     color_b: 0,
   });
-  const logEnd = useRef(null);
+  const logScrollRef = useRef(null);
+  const histScrollRef = useRef(null);
+  const uiLogLenRef = useRef(0);
+  const histLenRef = useRef(0);
+  const prevTabRef = useRef(0);
   const statusPollInFlightRef = useRef(false);
   const mergeStatusRef = useRef(null);
   const panelWsRef = useRef(null);
@@ -1716,6 +1720,33 @@ export default function ETD8A12Panel() {
     },
     [beginGlobalLoading, endGlobalLoading],
   );
+
+  const scrollContainerToBottom = useCallback((containerRef, { smooth = true } = {}) => {
+    const box = containerRef.current;
+    if (!box) return;
+    const run = () => {
+      box.scrollTo({
+        top: box.scrollHeight,
+        behavior: smooth ? "smooth" : "auto",
+      });
+    };
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  }, []);
+
+  const scrollContainerToTop = useCallback((containerRef, { smooth = true } = {}) => {
+    const box = containerRef.current;
+    if (!box) return;
+    const run = () => {
+      box.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+    };
+    requestAnimationFrame(() => {
+      run();
+      requestAnimationFrame(run);
+    });
+  }, []);
 
   useEffect(() => {
     const mergeStatusPayload = (d) => {
@@ -1928,9 +1959,15 @@ export default function ETD8A12Panel() {
     return () => clearInterval(iv);
   }, [serverOnline, tab]);
 
+  // Actividad (chat): al cargar y en cada línea nueva, scroll al final del panel.
   useEffect(() => {
-    logEnd.current?.scrollIntoView({ behavior: "smooth" });
-  }, [uiLog]);
+    if (uiLog.length === 0) return;
+    const isNewLine = uiLog.length > uiLogLenRef.current;
+    uiLogLenRef.current = uiLog.length;
+    scrollContainerToBottom(logScrollRef, {
+      smooth: isNewLine && uiLog.length > 1,
+    });
+  }, [uiLog, scrollContainerToBottom]);
 
   const doConnect = async (id) => {
     const endpoint = boards[id].connected
@@ -2380,6 +2417,17 @@ export default function ETD8A12Panel() {
 
   const filtered =
     histFilter === "ALL" ? events : events.filter((e) => e.type === histFilter);
+  // Histórico: más reciente arriba; al abrir pestaña o nuevos eventos, scroll al inicio de la lista.
+  useEffect(() => {
+    if (tab !== HISTORICO_TAB_INDEX || filtered.length === 0) return;
+    const tabOpened = prevTabRef.current !== HISTORICO_TAB_INDEX;
+    prevTabRef.current = tab;
+    const grew = filtered.length > histLenRef.current;
+    histLenRef.current = filtered.length;
+    scrollContainerToTop(histScrollRef, {
+      smooth: !tabOpened && grew && filtered.length > 1,
+    });
+  }, [tab, filtered, histFilter, scrollContainerToTop]);
   const totalModules = orderedModuleIds.length;
   const onlineModules = orderedModuleIds.reduce(
     (acc, mid) => acc + (boards[mid]?.connected ? 1 : 0),
@@ -2936,7 +2984,10 @@ export default function ETD8A12Panel() {
             </div>
             <Card style={{ padding: 15, overflow: "hidden" }}>
               <SecLabel>Actividad</SecLabel>
-              <div style={{ height: 520, overflowY: "auto", padding: 10 }}>
+              <div
+                ref={logScrollRef}
+                style={{ height: 520, overflowY: "auto", padding: 10 }}
+              >
                 {!serverOnline && (
                   <div style={{ color: C.red }}>API offline en `{API}`</div>
                 )}
@@ -3066,7 +3117,6 @@ export default function ETD8A12Panel() {
                     </div>
                   );
                 })}
-                <div ref={logEnd} />
               </div>
             </Card>
           </div>
@@ -3361,6 +3411,7 @@ export default function ETD8A12Panel() {
               </div>
             </div>
             <div
+              ref={histScrollRef}
               style={{
                 flex: 1,
                 minHeight: 0,
