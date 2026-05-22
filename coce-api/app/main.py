@@ -1,0 +1,54 @@
+"""COCE API — servidor central FastAPI."""
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.core.config import settings
+from app.db.schema import ensure_schema
+from app.api.routes import auth, branches, branch_ops, audit
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_schema()
+    yield
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.app_version,
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origin_list,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+prefix = settings.api_prefix
+app.include_router(auth.router, prefix=prefix)
+app.include_router(branches.router, prefix=prefix)
+app.include_router(branch_ops.router, prefix=prefix)
+app.include_router(audit.router, prefix=prefix)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "service": "coce-api"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
+    )

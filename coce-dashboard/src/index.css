@@ -956,3 +956,229 @@ th {
   margin: 0;
   font-size: 0.95rem;
 }
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--surface2, #f0f4f8);
+}
+
+.login-card {
+  max-width: 420px;
+  width: 100%;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.audit-table-wrap {
+  overflow-x: auto;
+}
+
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.audit-table th,
+.audit-table td {
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  text-align: left;
+  vertical-align: top;
+}
+
+.audit-table tr.audit-fail td {
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.panel-io-timestamp {
+  margin: 0 1rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.board-io-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 1rem 1rem;
+}
+
+.board-io-card {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: #fff;
+  padding: 1rem;
+}
+
+.board-io-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.board-io-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.board-io-cell--clickable {
+  cursor: pointer;
+}
+
+.board-io-cell--clickable:hover {
+  filter: brightness(0.97);
+}
+
+.board-io-card-header h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.board-io-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  font-size: 0.88rem;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+.board-io-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text, #1e293b);
+}
+
+.board-io-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+}
+
+.board-io-legend-item::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+.board-io-legend--active::before {
+  background: #fef3c7;
+  border: 1px solid #d97706;
+}
+
+.board-io-legend--forced-on::before {
+  background: #dcfce7;
+  border: 1px solid #16a34a;
+}
+
+.board-io-legend--forced-off::before {
+  background: #dbeafe;
+  border: 1px solid #2563eb;
+}
+
+.board-io-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .board-io-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .board-io-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.board-io-cell {
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 6px;
+  padding: 0.45rem 0.35rem;
+  text-align: center;
+  background: #fff;
+  min-height: 3.25rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.board-io-cell-code {
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+}
+
+.board-io-cell-name {
+  font-size: 0.62rem;
+  color: var(--muted);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-io-cell-state {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.board-io-cell--out.board-io-cell--on {
+  border-color: #f87171;
+  background: #fef2f2;
+}
+
+.board-io-cell--out.board-io-cell--on .board-io-cell-state {
+  color: #b91c1c;
+}
+
+.board-io-cell--in.board-io-cell--on:not(.board-io-cell--forced-on):not(.board-io-cell--forced-off) {
+  border-color: #d97706;
+  background: #fffbeb;
+}
+
+.board-io-cell--in.board-io-cell--on:not(.board-io-cell--forced-on):not(.board-io-cell--forced-off)
+  .board-io-cell-state {
+  color: #b45309;
+}
+
+.board-io-cell--forced-on {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.board-io-cell--forced-on .board-io-cell-state {
+  color: #15803d;
+}
+
+.board-io-cell--forced-off {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.board-io-cell--forced-off .board-io-cell-state {
+  color: #1d4ed8;
+}

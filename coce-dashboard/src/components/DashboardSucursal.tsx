@@ -2,24 +2,32 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { PanelBoardState, PanelModeRule, Sucursal } from "../types";
 import {
-  baseUrlFromSucursal,
-  fetchCurrentModeV1,
-  fetchModesV1,
-  fetchPanelStatus,
-  loginPanelWeb,
-  loginTabletV1,
-  setModeRuleV1,
-} from "../api/branchClient";
-import { loadSucursales } from "../storage/sucursales";
+  branchToSucursal,
+  fetchBranchSnapshot,
+  getBranch,
+  setBranchMode,
+} from "../api/coceClient";
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
+import type { PanelModuleConfig } from "../types";
+import { BoardIoPanel } from "./BoardIoPanel";
 
 type LoadState = {
   modes: PanelModeRule[];
   currentMode: string | null;
   boards: Array<{ id: string; data: PanelBoardState }>;
+  modulesConfig: PanelModuleConfig[];
+  panelTimestamp: string | null;
   panelOk: boolean;
   panelError: string | null;
 };
+
+function moduleForBoard(
+  modules: PanelModuleConfig[],
+  boardId: string,
+): PanelModuleConfig | undefined {
+  const n = Number(boardId);
+  return modules.find((m) => m.id === n || String(m.id) === boardId);
+}
 
 export function DashboardSucursal() {
   const { id } = useParams<{ id: string }>();
@@ -364,75 +372,57 @@ export function DashboardSucursal() {
 
   useEffect(() => {
     if (!id) return;
-    const s = loadSucursales().find((x) => x.id === id);
-    if (!s) {
-      navigate("/sucursales", { replace: true });
-      return;
-    }
-    setSucursal(s);
+    let cancelled = false;
+    (async () => {
+      try {
+        const b = await getBranch(id);
+        if (!cancelled) setSucursal(branchToSucursal(b));
+      } catch {
+        if (!cancelled) navigate("/sucursales", { replace: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [id, navigate]);
 
   const refresh = useCallback(async () => {
-    if (!sucursal) return;
+    if (!sucursal || !id) return;
     setLoading(true);
     setError(null);
-    const base = baseUrlFromSucursal(sucursal);
     try {
-      const tabletTok = await loginTabletV1(
-        base,
-        sucursal.usuarioTablet,
-        sucursal.passwordTablet,
-      );
-      const [modes, currentMode] = await Promise.all([
-        fetchModesV1(base, tabletTok),
-        fetchCurrentModeV1(base, tabletTok),
-      ]);
-
-      let boards: Array<{ id: string; data: PanelBoardState }> = [];
-      let panelOk = false;
-      let panelError: string | null = null;
-      const pu = sucursal.usuarioPanel?.trim();
-      const pp = sucursal.passwordPanel;
-      if (pu && pp) {
-        try {
-          const panelTok = await loginPanelWeb(base, pu, pp);
-          const status = await fetchPanelStatus(base, panelTok);
-          const raw = status.boards ?? {};
-          boards = Object.entries(raw).map(([bid, b]) => ({
-            id: bid,
-            data: b as PanelBoardState,
-          }));
-          panelOk = true;
-        } catch (e) {
-          panelError = e instanceof Error ? e.message : String(e);
-        }
-      }
-
-      setData({ modes, currentMode, boards, panelOk, panelError });
+      const snap = await fetchBranchSnapshot(id);
+      const boards = Object.entries(snap.boards ?? {}).map(([bid, b]) => ({
+        id: bid,
+        data: b as PanelBoardState,
+      }));
+      setData({
+        modes: snap.modes,
+        currentMode: snap.currentMode,
+        boards,
+        modulesConfig: snap.modulesConfig ?? [],
+        panelTimestamp: snap.panelTimestamp ?? null,
+        panelOk: snap.panelOk,
+        panelError: snap.panelError,
+      });
     } catch (e) {
       setData(null);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [sucursal]);
+  }, [sucursal, id]);
 
   useEffect(() => {
     if (sucursal) void refresh();
   }, [sucursal, refresh]);
 
   async function activateMode(ruleKey: string) {
-    if (!sucursal) return;
+    if (!sucursal || !id) return;
     setBusyKey(ruleKey);
     setError(null);
-    const base = baseUrlFromSucursal(sucursal);
     try {
-      const tabletTok = await loginTabletV1(
-        base,
-        sucursal.usuarioTablet,
-        sucursal.passwordTablet,
-      );
-      await setModeRuleV1(base, tabletTok, ruleKey, true);
+      await setBranchMode(id, ruleKey, true);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -449,7 +439,7 @@ export function DashboardSucursal() {
     );
   }
 
-  const base = baseUrlFromSucursal(sucursal);
+  const baseLabel = `${sucursal.useHttps ? "https" : "http"}://${sucursal.host}:${sucursal.port}`;
   const estado = getSucursalEstado(sucursal);
   const estadoLabel = SUCURSAL_ESTADO_LABELS[estado];
 
@@ -481,7 +471,7 @@ export function DashboardSucursal() {
           </div>
           <div>
             <h1>{sucursal.nombre}</h1>
-            <span className="tag">{base}</span>
+            <span className="tag">{baseLabel}</span>
           </div>
         </div>
 
@@ -737,7 +727,8 @@ export function DashboardSucursal() {
                 </p>
               </div>
 
-              {!sucursal.usuarioPanel?.trim() || !sucursal.passwordPanel ? (
+              {!sucursal.usuarioPanel?.trim() ||
+              !(sucursal.hasPasswordPanel || sucursal.passwordPanel) ? (
                 <div className="empty-state">
                   <svg
                     width="48"
@@ -772,45 +763,32 @@ export function DashboardSucursal() {
                   <p>No se han detectado placas configuradas.</p>
                 </div>
               ) : (
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>ID</th>
-                        <th>Nombre / Ubicación</th>
-                        <th>Conexión Modbus</th>
-                        <th style={{ textAlign: "center" }}>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.boards.map(({ id: bid, data: b }) => (
-                        <tr key={bid}>
-                          <td style={{ fontWeight: 600 }}>#{bid}</td>
-                          <td>
-                            {b.config?.name ?? (
-                              <span className="text-muted">Sin nombre</span>
-                            )}
-                          </td>
-                          <td
-                            className="text-muted"
-                            style={{ fontSize: "0.85rem" }}
-                          >
-                            {b.config?.host ?? "—"}:{b.config?.port ?? "—"}{" "}
-                            <br />
-                            <span>Esclavo: {b.config?.slave_id ?? "—"}</span>
-                          </td>
-                          <td style={{ textAlign: "center" }}>
-                            {b.connected ? (
-                              <span className="badge badge-ok">Conectada</span>
-                            ) : (
-                              <span className="badge badge-off">Offline</span>
-                            )}
-                          </td>
-                        </tr>
+                <>
+                  {data.panelTimestamp && (
+                    <p className="panel-io-timestamp">
+                      Última lectura panel:{" "}
+                      {new Date(data.panelTimestamp).toLocaleString("es-ES")}
+                    </p>
+                  )}
+                  <div className="board-io-stack">
+                    {[...data.boards]
+                      .sort((a, b) => Number(a.id) - Number(b.id))
+                      .map(({ id: bid, data: b }) => (
+                        <BoardIoPanel
+                          key={bid}
+                          branchId={id!}
+                          boardId={bid}
+                          board={b}
+                          moduleConfig={moduleForBoard(data.modulesConfig, bid)}
+                          canControl={
+                            !!(sucursal?.usuarioPanel?.trim() &&
+                              (sucursal.hasPasswordPanel || sucursal.passwordPanel))
+                          }
+                          onRefresh={refresh}
+                        />
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                  </div>
+                </>
               )}
             </div>
           </div>

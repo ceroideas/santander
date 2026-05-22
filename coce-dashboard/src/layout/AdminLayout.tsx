@@ -1,8 +1,11 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { clearCoceToken, coceMe, getCoceToken } from '../api/coceClient';
 
 const MENU = [
   { to: '/overview', label: 'Resumen ejecutivo' },
   { to: '/sucursales', label: 'Sucursales' },
+  { to: '/auditoria', label: 'Auditoría' },
   { to: '/updates', label: 'Actualizaciones remotas' },
   { to: '/mensajeria', label: 'Mensajeria avanzada' },
   { to: '/reporting', label: 'Reporting avanzado' },
@@ -12,7 +15,27 @@ const MENU = [
 
 export function AdminLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const inControl = location.pathname.startsWith('/control/');
+  const [username, setUsername] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!getCoceToken()) {
+      navigate('/login', { replace: true });
+      return;
+    }
+    coceMe()
+      .then((u) => setUsername(u.username))
+      .catch(() => {
+        clearCoceToken();
+        navigate('/login', { replace: true });
+      });
+  }, [navigate, location.pathname]);
+
+  function logout() {
+    clearCoceToken();
+    navigate('/login', { replace: true });
+  }
 
   return (
     <div className="coce-layout">
@@ -46,11 +69,13 @@ export function AdminLayout() {
         <header className="coce-topbar">
           <div>
             <h1>Centro de Operaciones y Control Externo</h1>
-            <p>Maquetacion tipo AdminLTE con funcionalidad actual preservada.</p>
+            <p>Datos en servidor COCE central · credenciales de oficina no expuestas al navegador</p>
           </div>
           <div className="topbar-badges">
-            <span className="badge badge-off">Panel central</span>
-            <span className="badge badge-ok">Activo</span>
+            {username && <span className="badge badge-ok">{username}</span>}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={logout}>
+              Salir
+            </button>
           </div>
         </header>
         <main className="coce-content">

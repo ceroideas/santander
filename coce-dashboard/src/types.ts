@@ -12,10 +12,13 @@ export type Sucursal = {
   useHttps: boolean;
   /** Usuario API tableta v1 (`/api/v1/*`) */
   usuarioTablet: string;
-  passwordTablet: string;
+  /** Solo en formulario alta; en listado viene del servidor sin contraseña */
+  passwordTablet?: string;
   /** Opcional: usuario panel web para JWT y `/api/panel/status` (placas) */
   usuarioPanel?: string;
+  /** Solo en formulario; en API central viene `hasPasswordPanel` */
   passwordPanel?: string;
+  hasPasswordPanel?: boolean;
   /** Por defecto operativo si no está definido */
   estado?: SucursalEstado;
 };
@@ -27,6 +30,18 @@ export type PanelModeRule = {
   auto_execute?: boolean;
 };
 
+export type PanelChannelConfig = {
+  channel_name?: string | null;
+  id?: number;
+};
+
+export type PanelModuleConfig = {
+  id: number;
+  name?: string;
+  inputs?: PanelChannelConfig[];
+  outputs?: PanelChannelConfig[];
+};
+
 export type PanelBoardState = {
   id: number;
   connected?: boolean;
@@ -36,6 +51,8 @@ export type PanelBoardState = {
     port?: number;
     slave_id?: number;
   };
-  inputs?: Record<string, boolean>;
-  outputs?: Record<string, boolean>;
+  inputs?: boolean[];
+  inputs_raw?: boolean[];
+  outputs?: boolean[];
+  input_overrides?: Array<boolean | null>;
 };

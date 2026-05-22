@@ -1,10 +1,17 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { loadSucursales } from '../storage/sucursales';
+import { listBranches } from '../api/coceClient';
+import type { Sucursal } from '../types';
 
 export function OverviewPage() {
-  const sucursales = loadSucursales();
+  const [sucursales, setSucursales] = useState<Sucursal[]>([]);
+
+  useEffect(() => {
+    listBranches().then(setSucursales).catch(() => setSucursales([]));
+  }, []);
+
   const total = sucursales.length;
-  const conPanel = sucursales.filter((s) => s.usuarioPanel?.trim() && s.passwordPanel).length;
+  const conPanel = sucursales.filter((s) => s.usuarioPanel?.trim()).length;
 
   return (
     <div className="content-view">

@@ -1,16 +1,35 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Sucursal, SucursalEstado } from '../types';
-import { loadSucursales, saveSucursales } from '../storage/sucursales';
+import { deleteBranch, listBranches } from '../api/coceClient';
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from '../sucursalEstado';
 import { SucursalCard } from './SucursalCard';
 
 type EstadoFilter = '' | SucursalEstado;
 
 export function SucursalList() {
-  const [list, setList] = useState<Sucursal[]>(() => loadSucursales());
+  const [list, setList] = useState<Sucursal[]>([]);
   const [search, setSearch] = useState('');
   const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setList(await listBranches());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
   const sorted = useMemo(
     () => [...list].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es')),
     [list],
@@ -31,24 +50,22 @@ export function SucursalList() {
     return result;
   }, [sorted, search, estadoFilter]);
 
-  function refresh() {
-    setList(loadSucursales());
-  }
-
-  function onDelete(id: string, nombre: string) {
+  async function onDelete(id: string, nombre: string) {
     if (!confirm(`¿Eliminar la sucursal «${nombre}»?`)) return;
-    saveSucursales(loadSucursales().filter((s) => s.id !== id));
-    refresh();
+    try {
+      await deleteBranch(id);
+      await refresh();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : String(e));
+    }
   }
 
   return (
     <div className="content-view">
       <header className="app-header">
         <div>
-          <h1>
-            COCE — Dashboard
-          </h1>
-          <span className="tag">Registro local de sucursales · solo navegador</span>
+          <h1>COCE — Dashboard</h1>
+          <span className="tag">Sucursales en servidor central coce-api</span>
         </div>
         <Link to="/sucursales/nueva" className="btn btn-primary">
           Añadir sucursal
@@ -56,12 +73,14 @@ export function SucursalList() {
       </header>
 
       <div className="alert alert-info">
-        Las credenciales se guardan en <strong>localStorage</strong> de este navegador. Cada sucursal debe permitir
-        CORS desde este origen o
-        ejecutar el dashboard en la misma red con políticas adecuadas.
+        Las credenciales de cada oficina se almacenan cifradas en <strong>coce-api</strong>. El navegador solo
+        guarda tu sesión COCE. Las operaciones remotas pasan por el servidor central y quedan en auditoría.
       </div>
 
-      {sorted.length === 0 ? (
+      {error && <div className="alert alert-error">{error}</div>}
+      {loading ? (
+        <p>Cargando sucursales…</p>
+      ) : sorted.length === 0 ? (
         <div className="card">
           <p>No hay sucursales registradas. Pulsa «Añadir sucursal» para conectar un sistema local.</p>
         </div>
