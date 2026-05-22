@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { clearPanelToken, getPanelToken } from "./panelAuth";
+import {
+  clearPanelToken,
+  getPanelToken,
+  getPanelWsLiveUrl,
+} from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
 import {
@@ -1645,6 +1649,8 @@ export default function ETD8A12Panel() {
   });
   const logEnd = useRef(null);
   const statusPollInFlightRef = useRef(false);
+  const mergeStatusRef = useRef(null);
+  const panelWsRef = useRef(null);
   const rulesMapRef = useRef(rulesMap);
   rulesMapRef.current = rulesMap;
 
@@ -1753,6 +1759,7 @@ export default function ETD8A12Panel() {
         setSelectedMode(d.current_mode);
       }
     };
+    mergeStatusRef.current = mergeStatusPayload;
 
     const poll = async (isInitial = false) => {
       if (statusPollInFlightRef.current) return;
@@ -1805,11 +1812,10 @@ export default function ETD8A12Panel() {
     let ws = null;
     let closed = false;
     const connectWs = () => {
-      const token = getPanelToken();
-      if (!token) return;
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const url = `${proto}//${window.location.host}/api/panel/ws/live?token=${encodeURIComponent(token)}`;
+      const url = getPanelWsLiveUrl();
+      if (!url) return;
       ws = new WebSocket(url);
+      panelWsRef.current = ws;
       ws.onopen = () => setServer(true);
       ws.onmessage = (ev) => {
         try {
@@ -1824,9 +1830,13 @@ export default function ETD8A12Panel() {
         }
       };
       ws.onclose = () => {
+        panelWsRef.current = null;
         if (!closed) window.setTimeout(connectWs, 3000);
       };
-      ws.onerror = () => setServer(false);
+      ws.onerror = () => {
+        panelWsRef.current = null;
+        setServer(false);
+      };
     };
     connectWs();
 
@@ -1844,8 +1854,23 @@ export default function ETD8A12Panel() {
       closed = true;
       clearInterval(pingIv);
       clearInterval(fallbackIv);
+      panelWsRef.current = null;
       ws?.close();
+      mergeStatusRef.current = null;
     };
+  }, []);
+
+  const afterPanelMutation = useCallback(async () => {
+    if (!mergeStatusRef.current) return;
+    try {
+      const d = await apiFetch("/status?refresh_hardware=false", {
+        timeoutMs: 20000,
+      });
+      mergeStatusRef.current(d);
+      setServer(true);
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {
@@ -1928,6 +1953,7 @@ export default function ETD8A12Panel() {
         connectedNow ? "OK" : "WARN",
         `Placa ${id} ${connectedNow ? "conectada" : "no conectada"}`,
       );
+      void afterPanelMutation();
     } catch (e) {
       addUI("ERR", `Placa ${id}: ${e.message}`);
     } finally {
@@ -1940,11 +1966,21 @@ export default function ETD8A12Panel() {
     if (!boards[boardId].connected) return;
     try {
       setPending((p) => ({ ...p, [`${boardId}-${channel}`]: true }));
+      const nextState = !current;
       await apiFetch(`/boards/${boardId}/output`, {
         method: "POST",
-        body: JSON.stringify({ channel, state: !current }),
+        body: JSON.stringify({ channel, state: nextState }),
       });
-      addUI("OK", `P${boardId} OUT${channel} -> ${!current ? "ON" : "OFF"}`);
+      setBoards((prev) => {
+        const b = prev[boardId];
+        if (!b) return prev;
+        const outs = [...(b.outputs || [])];
+        while (outs.length < channel) outs.push(false);
+        outs[channel - 1] = nextState;
+        return { ...prev, [boardId]: { ...b, outputs: outs } };
+      });
+      void afterPanelMutation();
+      addUI("OK", `P${boardId} OUT${channel} -> ${nextState ? "ON" : "OFF"}`);
     } catch (e) {
       addUI("ERR", e.message);
     } finally {
@@ -1957,6 +1993,7 @@ export default function ETD8A12Panel() {
       try {
         await apiFetch(`/boards/${id}/outputs/all_on`, { method: "POST" });
         addUI("OK", `Placa ${id}: todas ON`);
+        void afterPanelMutation();
       } catch (e) {
         addUI("ERR", e.message);
       }
@@ -1967,6 +2004,7 @@ export default function ETD8A12Panel() {
       try {
         await apiFetch(`/boards/${id}/outputs/all_off`, { method: "POST" });
         addUI("WARN", `Placa ${id}: todas OFF`);
+        void afterPanelMutation();
       } catch (e) {
         addUI("ERR", e.message);
       }
@@ -2094,6 +2132,15 @@ export default function ETD8A12Panel() {
           `Override IN${channel} en P${boardId}: ${next ? "FORZADA ON" : "FORZADA OFF"}`,
         );
       }
+      setBoards((prev) => {
+        const b = prev[boardId];
+        if (!b) return prev;
+        const ov = [...(b.input_overrides || [])];
+        while (ov.length < channel) ov.push(null);
+        ov[idx] = next;
+        return { ...prev, [boardId]: { ...b, input_overrides: ov } };
+      });
+      void afterPanelMutation();
     } catch (e) {
       addUI(
         "ERR",
@@ -2112,6 +2159,7 @@ export default function ETD8A12Panel() {
         if (result?.executed) {
           addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
           setSelectedMode(ruleKey);
+          void afterPanelMutation();
           return;
         }
         const reason = result?.reason || "Regla bloqueada o no ejecutada";

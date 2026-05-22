@@ -3,31 +3,30 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+import queue
+from typing import Any
 
 from fastapi import WebSocket
 
 log = logging.getLogger("panel.live")
 
 _clients: set[WebSocket] = set()
-_loop: Optional[asyncio.AbstractEventLoop] = None
-
-
-def set_event_loop(loop: asyncio.AbstractEventLoop) -> None:
-    global _loop
-    _loop = loop
+_pending: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=300)
 
 
 async def register(ws: WebSocket) -> None:
     _clients.add(ws)
+    log.info("Panel WS cliente conectado (total=%s)", len(_clients))
 
 
 async def unregister(ws: WebSocket) -> None:
     _clients.discard(ws)
+    log.info("Panel WS cliente desconectado (total=%s)", len(_clients))
 
 
 async def broadcast(message: dict[str, Any]) -> None:
     if not _clients:
+        log.debug("Panel WS broadcast omitido: sin clientes")
         return
     dead: list[WebSocket] = []
     for ws in list(_clients):
@@ -40,8 +39,21 @@ async def broadcast(message: dict[str, Any]) -> None:
 
 
 def publish_sync(message: dict[str, Any]) -> None:
-    """Llamada desde código síncrono del panel (tras Modbus / acciones)."""
-    loop = _loop
-    if loop is None or not loop.is_running():
-        return
-    asyncio.run_coroutine_threadsafe(broadcast(message), loop)
+    """Cola thread-safe; el pump asyncio vacía hacia los clientes WS."""
+    try:
+        _pending.put_nowait(message)
+    except queue.Full:
+        log.warning("Panel WS cola llena, evento descartado")
+
+
+async def pump_loop() -> None:
+    while True:
+        await asyncio.sleep(0.05)
+        batch: list[dict[str, Any]] = []
+        for _ in range(50):
+            try:
+                batch.append(_pending.get_nowait())
+            except queue.Empty:
+                break
+        for msg in batch:
+            await broadcast(msg)

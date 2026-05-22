@@ -119,7 +119,7 @@ async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
-    panel_live_hub.set_event_loop(asyncio.get_running_loop())
+    panel_live_pump = asyncio.create_task(panel_live_hub.pump_loop())
     try:
         ses.ensure_system_events_schema()
         n0 = ses.purge_events_older_than()
@@ -134,6 +134,7 @@ async def lifespan(app: FastAPI):
         auto_rules_task = asyncio.create_task(_auto_rules_background_loop())
     coce_ws_task: Optional[asyncio.Task] = start_coce_client_task()
     yield
+    panel_live_pump.cancel()
     retention_task.cancel()
     if auto_rules_task:
         auto_rules_task.cancel()
@@ -153,6 +154,10 @@ async def lifespan(app: FastAPI):
             await coce_ws_task
         except asyncio.CancelledError:
             pass
+    try:
+        await panel_live_pump
+    except asyncio.CancelledError:
+        pass
     log.info("Cerrando servicio")
 
 
