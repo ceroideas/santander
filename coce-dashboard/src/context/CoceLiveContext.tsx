@@ -18,6 +18,7 @@ export type LiveBranchInfo = {
   modbus?: boolean;
   boardsConnected?: number;
   boardsTotal?: number;
+  lastEventTs?: number | null;
 };
 
 type CoceLiveContextValue = {
@@ -46,6 +47,8 @@ function parseBranch(raw: Record<string, unknown>): LiveBranchInfo {
     modbus: Boolean(raw.modbus),
     boardsConnected: Number(raw.boardsConnected ?? 0),
     boardsTotal: Number(raw.boardsTotal ?? 0),
+    lastEventTs:
+      raw.lastEventTs != null ? Number(raw.lastEventTs) : null,
   };
 }
 

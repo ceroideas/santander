@@ -16,6 +16,7 @@ from app.coce.state import build_heartbeat_payload
 from app.core.config import settings
 
 log = logging.getLogger("coce.client")
+_send_lock: asyncio.Lock | None = None
 
 
 def _ws_url_with_token() -> str:
@@ -31,7 +32,11 @@ def _ws_url_with_token() -> str:
 
 
 async def _send_json(ws: Any, data: dict[str, Any]) -> None:
-    await ws.send(json.dumps(data))
+    global _send_lock
+    if _send_lock is None:
+        _send_lock = asyncio.Lock()
+    async with _send_lock:
+        await ws.send(json.dumps(data))
 
 
 async def _heartbeat_loop(ws: Any) -> None:

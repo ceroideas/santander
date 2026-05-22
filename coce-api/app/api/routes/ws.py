@@ -48,6 +48,11 @@ async def ws_branch_ingest(
         while True:
             data = await websocket.receive_json()
             if isinstance(data, dict):
+                log.info(
+                    "ingest %s type=%s",
+                    installation_id,
+                    data.get("type"),
+                )
                 await live_hub.ingest(installation_id, data, nombre=nombre)
     except WebSocketDisconnect:
         pass

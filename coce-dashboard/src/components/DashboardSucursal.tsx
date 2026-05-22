@@ -7,6 +7,7 @@ import {
   getBranch,
   setBranchMode,
 } from "../api/coceClient";
+import { useCoceLive } from "../context/CoceLiveContext";
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 import type { PanelModuleConfig } from "../types";
 import { BoardIoPanel } from "./BoardIoPanel";
@@ -31,6 +32,8 @@ function moduleForBoard(
 
 export function DashboardSucursal() {
   const { id } = useParams<{ id: string }>();
+  const live = useCoceLive();
+  const liveBranch = id ? live.getLiveBranch(id) : undefined;
   const navigate = useNavigate();
   const [sucursal, setSucursal] = useState<Sucursal | null>(null);
   const [loading, setLoading] = useState(false);
@@ -416,6 +419,13 @@ export function DashboardSucursal() {
   useEffect(() => {
     if (sucursal) void refresh();
   }, [sucursal, refresh]);
+
+  // Actualizar panel remoto cuando la sucursal emite eventos por WS (cambios en oficina).
+  useEffect(() => {
+    if (!id || !live.connected || !liveBranch?.lastEventTs) return;
+    const t = window.setTimeout(() => void refresh(), 350);
+    return () => clearTimeout(t);
+  }, [id, live.connected, liveBranch?.lastEventTs, refresh]);
 
   async function activateMode(ruleKey: string) {
     if (!sucursal || !id) return;
