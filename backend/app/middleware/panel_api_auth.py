@@ -23,6 +23,8 @@ def _is_public_api_path(path: str) -> bool:
         return True
     if path == f"{base}/status":
         return True
+    if path == f"{base}/panel/ws/live":
+        return True
     if path == f"{base}/panel/diagnostics/rtu-ping":
         return True
     if path.startswith(f"{base}/auth/"):

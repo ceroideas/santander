@@ -1801,9 +1801,51 @@ export default function ETD8A12Panel() {
       }
     };
     poll(true);
-    // ~5 s: estado del panel; pestaña oculta no fuerza Modbus.
-    const iv = setInterval(() => poll(false), 5000);
-    return () => clearInterval(iv);
+
+    let ws = null;
+    let closed = false;
+    const connectWs = () => {
+      const token = getPanelToken();
+      if (!token) return;
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const url = `${proto}//${window.location.host}/api/panel/ws/live?token=${encodeURIComponent(token)}`;
+      ws = new WebSocket(url);
+      ws.onopen = () => setServer(true);
+      ws.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(String(ev.data));
+          if (data.type === "panel_status" && data.payload) {
+            mergeStatusPayload(data.payload);
+            setServer(true);
+            setInitialStatusLoaded(true);
+          }
+        } catch {
+          /* ignore */
+        }
+      };
+      ws.onclose = () => {
+        if (!closed) window.setTimeout(connectWs, 3000);
+      };
+      ws.onerror = () => setServer(false);
+    };
+    connectWs();
+
+    const pingIv = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) ws.send("ping");
+    }, 25000);
+
+    // Respaldo solo si el WS no está conectado (sin polling cada 5 s).
+    const fallbackIv = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) return;
+      void poll(false);
+    }, 60000);
+
+    return () => {
+      closed = true;
+      clearInterval(pingIv);
+      clearInterval(fallbackIv);
+      ws?.close();
+    };
   }, []);
 
   useEffect(() => {

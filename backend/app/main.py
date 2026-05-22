@@ -14,8 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel, coce_status
+from app.api.routes import health, status, modes, events, config, panel, panel_ws, tablet_v1, auth_panel, coce_status
 from app.coce.client import start_coce_client_task
+from app.services import panel_live_hub
 from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
@@ -118,6 +119,7 @@ async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
+    panel_live_hub.set_event_loop(asyncio.get_running_loop())
     try:
         ses.ensure_system_events_schema()
         n0 = ses.purge_events_older_than()
@@ -181,6 +183,7 @@ app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])
 app.include_router(config.router, prefix=settings.api_prefix, tags=["Configuración"])
 app.include_router(panel.router, prefix=settings.api_prefix, tags=["Panel ETD8A12"])
+app.include_router(panel_ws.router, prefix=f"{settings.api_prefix}/panel", tags=["Panel ETD8A12"])
 app.include_router(auth_panel.router, prefix=settings.api_prefix)
 app.include_router(tablet_v1.router, prefix=settings.api_prefix)
 # Endpoints para integración ESP32 zaguán (sin prefijo /api, compat firmware)

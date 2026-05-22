@@ -36,15 +36,6 @@ PULSE_5_SG_TYPE = "pulso_5_sg"
 PULSE_5_SG_DEFAULT_SECONDS = 0
 
 
-def _coce_notify(event_type: str, payload: dict | None = None) -> None:
-    try:
-        from app.coce.notify import emit_coce_event
-
-        emit_coce_event(event_type, payload or {})
-    except Exception:  # noqa: BLE001
-        pass
-
-
 _coce_status_last_emit: float = 0.0
 _COCE_STATUS_MIN_INTERVAL_S = 0.3
 
@@ -85,14 +76,37 @@ def _io_tuple(board_id: int) -> tuple[tuple[bool, ...], tuple[bool, ...], tuple[
     )
 
 
-def _coce_notify_panel_status_debounced() -> None:
-    """Tras lectura Modbus: mismo JSON que /status?refresh_hardware=false para el COCE."""
+def _publish_panel_status_debounced() -> None:
+    """Estado panel en RAM → COCE (WS) y dashboard local (WS)."""
     global _coce_status_last_emit
     now = time.time()
     if now - _coce_status_last_emit < _COCE_STATUS_MIN_INTERVAL_S:
         return
     _coce_status_last_emit = now
-    _coce_notify("panel_status", _build_status_payload())
+    payload = _build_status_payload()
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event("panel_status", payload)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        from app.services import panel_live_hub as plh
+
+        plh.publish_sync({"type": "panel_status", "payload": payload})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _coce_notify(event_type: str, payload: dict | None = None) -> None:
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event(event_type, payload or {})
+    except Exception:  # noqa: BLE001
+        pass
+    if event_type != "heartbeat":
+        _publish_panel_status_debounced()
 
 
 def _rule_owns_operational_mode(rule: dict) -> bool:
@@ -710,7 +724,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         io_state[board_id]["error"] = None
         _read_io_fail_streak[board_id] = 0
         if _io_tuple(board_id) != io_before:
-            _coce_notify_panel_status_debounced()
+            _publish_panel_status_debounced()
     except Exception as e:  # noqa: BLE001
         # Reintento único tras reconexión cuando el equipo resetea socket (WinError 10054).
         if not retried and not _connect_backoff_active(board_id):
