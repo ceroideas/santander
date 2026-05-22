@@ -47,4 +47,12 @@ def ensure_schema() -> None:
             CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
             """
         )
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(branches)").fetchall()
+        }
+        if "ingest_token_enc" not in cols:
+            conn.execute(
+                "ALTER TABLE branches ADD COLUMN ingest_token_enc TEXT"
+            )
         conn.commit()

@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     zaguan_device_port: int = 80
     zaguan_device_timeout_s: float = 2.0
 
+    # Canal COCE central (WebSocket saliente + heartbeat)
+    coce_ws_enabled: bool = False
+    coce_ws_url: str = ""
+    coce_installation_id: str = ""
+    coce_ingest_token: str = ""
+    coce_heartbeat_interval_seconds: int = 60
+    coce_reconnect_seconds: int = 5
+
     @model_validator(mode="after")
     def normalize_api_prefix(self) -> "Settings":
         """Evita API_PREFIX vacío o con barras dobles que rompen el match con el proxy Vite (/api/...)."""

@@ -36,6 +36,15 @@ PULSE_5_SG_TYPE = "pulso_5_sg"
 PULSE_5_SG_DEFAULT_SECONDS = 0
 
 
+def _coce_notify(event_type: str, payload: dict | None = None) -> None:
+    try:
+        from app.coce.notify import emit_coce_event
+
+        emit_coce_event(event_type, payload or {})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _rule_owns_operational_mode(rule: dict) -> bool:
     """Solo `enclavamiento` define el modo operativo global (`current_mode`). Pulso, manual, etc. no lo sustituyen."""
     return (rule.get("type") or "enclavamiento") == "enclavamiento"
@@ -1438,6 +1447,7 @@ def _evaluate_trigger_rule(
     if _rule_owns_operational_mode(rule):
         current_mode = rule_key
         _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": current_mode})
     _persist_overrides_to_db()
 
     origin_tag = f"enclavamiento:{rule_key}"
@@ -1548,6 +1558,7 @@ def _deactivate_rule_on_fall(
     mode_latches[trigger_code] = False
     current_mode = None
     _persist_current_mode_to_db()
+    _coce_notify("mode_changed", {"current_mode": None})
 
     _restore_temp_deactivate_outputs(
         rule, rule_key, apply_outputs_to_hardware, origin=f"desactiva_flanco:{rule_key}"
@@ -1759,6 +1770,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
     if _rule_owns_operational_mode(rule):
         current_mode = rule_key
         _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": current_mode})
     _persist_overrides_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
@@ -1929,8 +1941,12 @@ def connect_board(board_id: int):
     ok = _connect_board(board_id)
     if ok:
         _read_all_io(board_id)
-    # "connected" refleja el estado real final (tras handshake/poll), no solo apertura TCP.
-    return {"board_id": board_id, "connected": io_state[board_id]["connected"], "state": io_state[board_id]}
+    connected = io_state[board_id]["connected"]
+    _coce_notify(
+        "board_connected",
+        {"board_id": board_id, "connected": connected},
+    )
+    return {"board_id": board_id, "connected": connected, "state": io_state[board_id]}
 
 
 @router.get("/diagnostics/rtu-ping")
@@ -2074,6 +2090,7 @@ def disconnect_board(board_id: int):
         io_state[board_id]["connected"] = False
         _reset_read_io_fail_streak(board_id)
         add_event("WARN", "Desconectado manualmente", board_id)
+    _coce_notify("board_disconnected", {"board_id": board_id, "connected": False})
     return {"board_id": board_id, "connected": False}
 
 
@@ -2122,6 +2139,14 @@ def set_output(board_id: int, action: ChannelAction):
             raise HTTPException(status_code=502, detail=f"Error Modbus: {result}")
         io_state[board_id]["outputs"][action.channel - 1] = action.state
         add_event("OK", f"CH{action.channel:02d} -> {'ON' if action.state else 'OFF'}", board_id)
+        _coce_notify(
+            "output_changed",
+            {
+                "board_id": board_id,
+                "channel": action.channel,
+                "state": action.state,
+            },
+        )
         return {"board_id": board_id, "channel": action.channel, "state": action.state}
     except ModbusException as e:
         raise HTTPException(status_code=502, detail=f"Error Modbus: {e}")
@@ -2312,6 +2337,14 @@ def set_input_override(action: InputOverrideAction):
     input_overrides[action.board_id][idx] = action.state
     _persist_overrides_to_db()
     add_event("INFO", f"Override IN{action.channel:02d} = {action.state}", action.board_id)
+    _coce_notify(
+        "input_override",
+        {
+            "board_id": action.board_id,
+            "channel": action.channel,
+            "override": action.state,
+        },
+    )
     return {"board_id": action.board_id, "channel": action.channel, "override": action.state}
 
 
@@ -2326,6 +2359,10 @@ def clear_input_override(board_id: int, channel: int):
     input_overrides[board_id][idx] = None
     _persist_overrides_to_db()
     add_event("INFO", f"Override IN{channel:02d} limpiado", board_id)
+    _coce_notify(
+        "input_override",
+        {"board_id": board_id, "channel": channel, "override": None},
+    )
     return {"board_id": board_id, "channel": channel, "override": None}
 
 
@@ -2574,6 +2611,7 @@ def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
                 )
     current_mode = None
     _persist_current_mode_to_db()
+    _coce_notify("mode_changed", {"current_mode": None})
     add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
     return {"cleared": True, "current_mode": None, "outputs_restored": restored}
 
@@ -2594,4 +2632,8 @@ def api_v1_set_output_by_code(code: str, on: bool) -> dict:
         raise HTTPException(status_code=503, detail=f"No se pudo conectar módulo {board_id}")
     _write_output(board_id, channel, on)
     add_event("OK", f"Salida (API tablet v1) {code} -> {'ON' if on else 'OFF'}", board_id)
+    _coce_notify(
+        "output_changed",
+        {"board_id": board_id, "channel": channel, "state": on, "code": code},
+    )
     return {"code": code, "on": on, "board_id": board_id, "channel": channel}

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { Sucursal } from "../types";
+import { resolveSucursalEstado, useCoceLive } from "../context/CoceLiveContext";
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 
 function DevicesIcon() {
@@ -76,7 +77,12 @@ type Props = {
 };
 
 export function SucursalCard({ sucursal, onDelete }: Props) {
-  const estado = getSucursalEstado(sucursal);
+  const live = useCoceLive();
+  const estado = resolveSucursalEstado(
+    sucursal.id,
+    getSucursalEstado(sucursal),
+    live,
+  );
   const estadoLabel = SUCURSAL_ESTADO_LABELS[estado];
   const ipLabel =
     sucursal.port === 80 || sucursal.port === 443

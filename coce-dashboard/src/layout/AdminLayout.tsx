@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { clearCoceToken, coceMe, getCoceToken } from '../api/coceClient';
+import { CoceLiveProvider } from '../context/CoceLiveContext';
 
 const MENU = [
   { to: '/overview', label: 'Resumen ejecutivo' },
@@ -38,6 +39,7 @@ export function AdminLayout() {
   }
 
   return (
+    <CoceLiveProvider>
     <div className="coce-layout">
       <aside className="coce-sidebar">
         <div className="coce-brand">
@@ -83,5 +85,6 @@ export function AdminLayout() {
         </main>
       </div>
     </div>
+    </CoceLiveProvider>
   );
 }

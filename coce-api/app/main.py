@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.schema import ensure_schema
-from app.api.routes import auth, branches, branch_ops, audit
+from app.api.routes import auth, branches, branch_ops, audit, ws
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.include_router(auth.router, prefix=prefix)
 app.include_router(branches.router, prefix=prefix)
 app.include_router(branch_ops.router, prefix=prefix)
 app.include_router(audit.router, prefix=prefix)
+app.include_router(ws.router, prefix=prefix)
 
 
 @app.get("/health")

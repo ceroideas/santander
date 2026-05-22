@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { Sucursal, SucursalEstado } from '../types';
 import { deleteBranch, listBranches } from '../api/coceClient';
+import { resolveSucursalEstado, useCoceLive } from '../context/CoceLiveContext';
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from '../sucursalEstado';
 import { SucursalCard } from './SucursalCard';
 
 type EstadoFilter = '' | SucursalEstado;
 
 export function SucursalList() {
+  const live = useCoceLive();
   const [list, setList] = useState<Sucursal[]>([]);
   const [search, setSearch] = useState('');
   const [estadoFilter, setEstadoFilter] = useState<EstadoFilter>('');
@@ -45,10 +47,13 @@ export function SucursalList() {
       );
     }
     if (estadoFilter) {
-      result = result.filter((s) => getSucursalEstado(s) === estadoFilter);
+      result = result.filter(
+        (s) =>
+          resolveSucursalEstado(s.id, getSucursalEstado(s), live) === estadoFilter,
+      );
     }
     return result;
-  }, [sorted, search, estadoFilter]);
+  }, [sorted, search, estadoFilter, live]);
 
   async function onDelete(id: string, nombre: string) {
     if (!confirm(`¿Eliminar la sucursal «${nombre}»?`)) return;
@@ -75,6 +80,11 @@ export function SucursalList() {
       <div className="alert alert-info">
         Las credenciales de cada oficina se almacenan cifradas en <strong>coce-api</strong>. El navegador solo
         guarda tu sesión COCE. Las operaciones remotas pasan por el servidor central y quedan en auditoría.
+        {live.connected && (
+          <span className="badge badge-ok" style={{ marginLeft: 8 }}>
+            Tiempo real activo
+          </span>
+        )}
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

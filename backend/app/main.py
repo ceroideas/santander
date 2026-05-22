@@ -14,7 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.core.config import BASE_DIR, settings
-from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel
+from app.api.routes import health, status, modes, events, config, panel, tablet_v1, auth_panel, coce_status
+from app.coce.client import start_coce_client_task
 from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
@@ -129,10 +130,13 @@ async def lifespan(app: FastAPI):
     auto_rules_task: Optional[asyncio.Task] = None
     if settings.auto_rules_background_enabled:
         auto_rules_task = asyncio.create_task(_auto_rules_background_loop())
+    coce_ws_task: Optional[asyncio.Task] = start_coce_client_task()
     yield
     retention_task.cancel()
     if auto_rules_task:
         auto_rules_task.cancel()
+    if coce_ws_task:
+        coce_ws_task.cancel()
     try:
         await retention_task
     except asyncio.CancelledError:
@@ -140,6 +144,11 @@ async def lifespan(app: FastAPI):
     if auto_rules_task:
         try:
             await auto_rules_task
+        except asyncio.CancelledError:
+            pass
+    if coce_ws_task:
+        try:
+            await coce_ws_task
         except asyncio.CancelledError:
             pass
     log.info("Cerrando servicio")
@@ -166,6 +175,7 @@ app.add_middleware(TabletActorContextMiddleware)
 
 # Rutas bajo /api (ver API_SPEC.md)
 app.include_router(health.router, prefix=settings.api_prefix, tags=["Salud"])
+app.include_router(coce_status.router, prefix=settings.api_prefix)
 app.include_router(status.router, prefix=settings.api_prefix, tags=["Estado"])
 app.include_router(modes.router, prefix=settings.api_prefix, tags=["Modos"])
 app.include_router(events.router, prefix=settings.api_prefix, tags=["Eventos"])

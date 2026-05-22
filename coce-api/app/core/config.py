@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
 
+    # WebSocket ingest sucursal → COCE (API key por sucursal)
+    branch_auth_required: bool = True
+    branch_heartbeat_timeout_seconds: int = 120
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

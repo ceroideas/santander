@@ -74,7 +74,7 @@ def create(
         "passwordPanel": body.passwordPanel or "",
         "estado": body.estado,
     }
-    row = branches.create_branch(data)
+    row, ingest_token = branches.create_branch(data)
     audit.record_audit(
         actor_username=user,
         action="branch.create",
@@ -83,7 +83,7 @@ def create(
         detail={"host": row["host"], "port": row["port"]},
         ip_address=get_client_ip(request),
     )
-    return row
+    return {**row, "ingestToken": ingest_token}
 
 
 @router.put("/{branch_id}")

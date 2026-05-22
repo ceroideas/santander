@@ -34,6 +34,7 @@ export function SucursalForm() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [createdEnv, setCreatedEnv] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -89,13 +90,25 @@ export function SucursalForm() {
     try {
       if (isEdit && id) {
         await updateBranch(id, payload);
+        navigate('/sucursales');
       } else {
-        await createBranch({
+        const created = await createBranch({
           ...payload,
           passwordTablet: form.passwordTablet,
         });
+        const wsHint =
+          (import.meta.env.VITE_COCE_WS_BRANCH_URL as string | undefined)?.trim() ||
+          'ws://localhost:9000/api/coce/ws/branch/' + created.id;
+        setCreatedEnv(
+          [
+            '# Copiar en backend/.env de la sucursal',
+            `COCE_WS_ENABLED=true`,
+            `COCE_WS_URL=${wsHint}`,
+            `COCE_INSTALLATION_ID=${created.id}`,
+            `COCE_INGEST_TOKEN=${created.ingestToken ?? ''}`,
+          ].join('\n'),
+        );
       }
-      navigate('/sucursales');
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -117,6 +130,40 @@ export function SucursalForm() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      {createdEnv && (
+        <div className="card">
+          <h2>Configuración canal COCE (sucursal)</h2>
+          <p style={{ color: 'var(--muted)', fontSize: '0.9rem' }}>
+            Copia estas variables en <code>backend/.env</code> del PC de la oficina. El token solo se muestra una vez.
+          </p>
+          <pre
+            style={{
+              background: 'var(--surface-2, #f4f4f5)',
+              padding: '1rem',
+              overflow: 'auto',
+              fontSize: '0.85rem',
+            }}
+          >
+            {createdEnv}
+          </pre>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => {
+                void navigator.clipboard.writeText(createdEnv);
+              }}
+            >
+              Copiar al portapapeles
+            </button>
+            <Link to="/sucursales" className="btn btn-secondary">
+              Ir al listado
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {!createdEnv && (
       <form className="card" onSubmit={submit}>
         <h2>Datos de conexión</h2>
         <label className="field">
@@ -232,6 +279,7 @@ export function SucursalForm() {
           </Link>
         </div>
       </form>
+      )}
     </div>
   );
 }

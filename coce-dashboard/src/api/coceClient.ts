@@ -150,13 +150,15 @@ export type BranchPayload = {
   estado?: SucursalEstado;
 };
 
-export async function createBranch(payload: BranchPayload): Promise<BranchApi> {
+export type BranchCreateResult = BranchApi & { ingestToken?: string };
+
+export async function createBranch(payload: BranchPayload): Promise<BranchCreateResult> {
   const res = await apiFetch('/api/coce/branches', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await readError(res));
-  return (await res.json()) as BranchApi;
+  return (await res.json()) as BranchCreateResult;
 }
 
 export async function updateBranch(id: string, payload: BranchPayload): Promise<BranchApi> {
