@@ -840,7 +840,38 @@ def _default_rule_runtime(rule_key: str) -> dict:
     rules_runtime[rule_key].setdefault("last_follow_on", False)
     rules_runtime[rule_key].setdefault("temp_deact_snapshot", {})
     rules_runtime[rule_key].setdefault("temp_deact_restore_at", None)
+    rules_runtime[rule_key].setdefault("pulse_trigger_panel_override", False)
     return rules_runtime[rule_key]
+
+
+def _clear_pulse_trigger_override_after_panel_pulse(rule_key: str, rule: dict, runtime: dict) -> None:
+    """Tras un pulso temporizado disparado por override, libera el IN (null) para ver el estado real."""
+    if not runtime.pop("pulse_trigger_panel_override", False):
+        return
+    trigger_code = rule.get("trigger")
+    if not isinstance(trigger_code, str) or not trigger_code:
+        return
+    board_id, channel = _parse_in_code(trigger_code)
+    input_overrides[board_id][channel - 1] = None
+    _persist_overrides_to_db()
+    add_event("INFO", f"Pulso finalizado: override liberado en {trigger_code} ({rule_key})", 1)
+
+
+def _finish_timed_pulse(
+    rule: dict,
+    rule_key: str,
+    runtime: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    origin: str,
+) -> None:
+    """Apaga salidas del pulso, restaura desactivación temporal y limpia override del trigger si tocaba."""
+    _restore_temp_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware, origin=origin
+    )
+    _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
+    runtime["pulse_until"] = None
+    _clear_pulse_trigger_override_after_panel_pulse(rule_key, rule, runtime)
 
 
 def _rule_deactivate_outputs_temporary(rule: dict) -> bool:
@@ -1080,22 +1111,27 @@ def _evaluate_pulse_5_sg_rule(
             _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
             runtime["last_follow_on"] = False
         if runtime.get("pulse_until"):
-            _restore_temp_deactivate_outputs(
-                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_fin:{rule_key}"
+            _finish_timed_pulse(
+                rule,
+                rule_key,
+                runtime,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                origin=f"pulso_fin:{rule_key}",
             )
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
-            runtime["pulse_until"] = None
+            add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
         return {"executed": False, "reason": "Regla deshabilitada"}
 
     if secs > 0:
         now = datetime.now()
         end_dt = _parse_iso_datetime(runtime.get("pulse_until"))
         if end_dt is not None and now >= end_dt:
-            _restore_temp_deactivate_outputs(
-                rule, rule_key, apply_outputs_to_hardware, origin=f"pulso_fin:{rule_key}"
+            _finish_timed_pulse(
+                rule,
+                rule_key,
+                runtime,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                origin=f"pulso_fin:{rule_key}",
             )
-            _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, False, rule_key=rule_key)
-            runtime["pulse_until"] = None
             add_event("INFO", f"Pulso finalizado: {rule_key}", 1)
 
         trigger_code = rule.get("trigger", "IN_01_01")
@@ -1163,6 +1199,9 @@ def _evaluate_pulse_5_sg_rule(
         _pulse_apply_activate_outputs(rule, apply_outputs_to_hardware, True, rule_key=rule_key)
         until = now + timedelta(seconds=secs)
         runtime["pulse_until"] = until.isoformat()
+        runtime["pulse_trigger_panel_override"] = _trigger_activated_by_panel_override(
+            trigger_code, manual=manual
+        )
         runtime["last_executed_at"] = now.isoformat()
         add_event("OK", f"Pulso {secs}s iniciado: {rule_key}", 1)
         return {
@@ -1661,6 +1700,7 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         rt["last_executed_at"] = datetime.now().isoformat()
         if secs > 0:
             rt["pulse_until"] = (datetime.now() + timedelta(seconds=secs)).isoformat()
+            rt["pulse_trigger_panel_override"] = True
             _persist_overrides_to_db()
             add_event("OK", f"Pulso forzado {secs}s: {rule_key}", 1)
             return {
