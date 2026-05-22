@@ -82,7 +82,11 @@ async def panel_login(base: str, user: str, password: str) -> str:
     return str(tok)
 
 
-async def fetch_branch_snapshot(branch: dict[str, Any]) -> dict[str, Any]:
+async def fetch_branch_snapshot(
+    branch: dict[str, Any],
+    *,
+    refresh_hardware: bool = False,
+) -> dict[str, Any]:
     base = branch_base_url(branch)
     tablet_tok = await tablet_login(
         base, branch["usuarioTablet"], branch["passwordTablet"]
@@ -116,6 +120,7 @@ async def fetch_branch_snapshot(branch: dict[str, Any]) -> dict[str, Any]:
                 st = await client.get(
                     f"{base}/api/panel/status",
                     headers={"Authorization": f"Bearer {panel_tok}"},
+                    params={"refresh_hardware": str(refresh_hardware).lower()},
                 )
             if st.status_code >= 400:
                 panel_error = await _read_error(st)
@@ -137,6 +142,35 @@ async def fetch_branch_snapshot(branch: dict[str, Any]) -> dict[str, Any]:
         "panelTimestamp": panel_timestamp,
         "panelOk": panel_ok,
         "panelError": panel_error,
+    }
+
+
+async def fetch_branch_panel_status(
+    branch: dict[str, Any],
+    *,
+    refresh_hardware: bool = False,
+) -> dict[str, Any]:
+    """Solo GET /api/panel/status (como el dashboard local). Sin modos tablet."""
+    user, password = _require_panel_credentials(branch)
+    base = branch_base_url(branch)
+    panel_tok = await panel_login(base, user, password)
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        st = await client.get(
+            f"{base}/api/panel/status",
+            headers={"Authorization": f"Bearer {panel_tok}"},
+            params={"refresh_hardware": str(refresh_hardware).lower()},
+        )
+    if st.status_code >= 400:
+        raise RuntimeError(await _read_error(st))
+    status = st.json()
+    return {
+        "baseUrl": base,
+        "boards": status.get("boards") or {},
+        "modulesConfig": status.get("modules_config") or [],
+        "currentMode": status.get("current_mode"),
+        "panelTimestamp": status.get("timestamp"),
+        "panelOk": True,
+        "panelError": None,
     }
 
 

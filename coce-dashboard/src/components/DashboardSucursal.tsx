@@ -3,11 +3,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import type { PanelBoardState, PanelModeRule, Sucursal } from "../types";
 import {
   branchToSucursal,
+  fetchBranchPanelStatus,
   fetchBranchSnapshot,
   getBranch,
   setBranchMode,
 } from "../api/coceClient";
 import { useCoceLive } from "../context/CoceLiveContext";
+import { applyLivePatch } from "../utils/applyLivePatch";
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 import type { PanelModuleConfig } from "../types";
 import { BoardIoPanel } from "./BoardIoPanel";
@@ -389,43 +391,70 @@ export function DashboardSucursal() {
     };
   }, [id, navigate]);
 
-  const refresh = useCallback(async () => {
-    if (!sucursal || !id) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const snap = await fetchBranchSnapshot(id);
-      const boards = Object.entries(snap.boards ?? {}).map(([bid, b]) => ({
-        id: bid,
-        data: b as PanelBoardState,
-      }));
-      setData({
-        modes: snap.modes,
-        currentMode: snap.currentMode,
-        boards,
-        modulesConfig: snap.modulesConfig ?? [],
-        panelTimestamp: snap.panelTimestamp ?? null,
-        panelOk: snap.panelOk,
-        panelError: snap.panelError,
-      });
-    } catch (e) {
-      setData(null);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [sucursal, id]);
+  const refresh = useCallback(
+    async (opts?: { full?: boolean }) => {
+      if (!sucursal || !id) return;
+      setLoading(true);
+      setError(null);
+      try {
+        if (opts?.full || !data?.modes.length) {
+          const snap = await fetchBranchSnapshot(id);
+          const boards = Object.entries(snap.boards ?? {}).map(([bid, b]) => ({
+            id: bid,
+            data: b as PanelBoardState,
+          }));
+          setData({
+            modes: snap.modes,
+            currentMode: snap.currentMode,
+            boards,
+            modulesConfig: snap.modulesConfig ?? [],
+            panelTimestamp: snap.panelTimestamp ?? null,
+            panelOk: snap.panelOk,
+            panelError: snap.panelError,
+          });
+        } else {
+          const st = await fetchBranchPanelStatus(id);
+          const boards = Object.entries(st.boards ?? {}).map(([bid, b]) => ({
+            id: bid,
+            data: b as PanelBoardState,
+          }));
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  currentMode: st.currentMode ?? prev.currentMode,
+                  boards,
+                  modulesConfig: st.modulesConfig ?? prev.modulesConfig,
+                  panelTimestamp: st.panelTimestamp ?? prev.panelTimestamp,
+                  panelOk: st.panelOk,
+                  panelError: st.panelError,
+                }
+              : prev,
+          );
+        }
+      } catch (e) {
+        setData(null);
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sucursal, id, data?.modes.length],
+  );
 
   useEffect(() => {
     if (sucursal) void refresh();
   }, [sucursal, refresh]);
 
-  // Actualizar panel remoto cuando la sucursal emite eventos por WS (cambios en oficina).
+  // Eventos WS: parche local (sin snapshot lento vía ZeroTier + Modbus).
   useEffect(() => {
-    if (!id || !live.connected || !liveBranch?.lastEventTs) return;
-    const t = window.setTimeout(() => void refresh(), 350);
-    return () => clearTimeout(t);
-  }, [id, live.connected, liveBranch?.lastEventTs, refresh]);
+    const msg = liveBranch?.lastMessage;
+    if (!id || !live.connected || !msg) return;
+    setData((prev) => {
+      if (!prev) return prev;
+      return applyLivePatch(prev, msg.type, msg.payload) ?? prev;
+    });
+  }, [id, live.connected, liveBranch?.lastMessage]);
 
   async function activateMode(ruleKey: string) {
     if (!sucursal || !id) return;

@@ -187,10 +187,31 @@ export type BranchSnapshot = {
   panelError: string | null;
 };
 
-export async function fetchBranchSnapshot(branchId: string): Promise<BranchSnapshot> {
-  const res = await apiFetch(`/api/coce/branches/${branchId}/snapshot`);
+export async function fetchBranchSnapshot(
+  branchId: string,
+  options?: { refreshHardware?: boolean },
+): Promise<BranchSnapshot> {
+  const q =
+    options?.refreshHardware === true ? '?refresh_hardware=true' : '';
+  const res = await apiFetch(`/api/coce/branches/${branchId}/snapshot${q}`);
   if (!res.ok) throw new Error(await readError(res));
   return (await res.json()) as BranchSnapshot;
+}
+
+/** Solo /api/panel/status vía proxy (rápido, como ETD8A12Panel local). */
+export async function fetchBranchPanelStatus(
+  branchId: string,
+  options?: { refreshHardware?: boolean },
+): Promise<Pick<
+  BranchSnapshot,
+  'boards' | 'modulesConfig' | 'currentMode' | 'panelTimestamp' | 'panelOk' | 'panelError'
+>> {
+  const q =
+    options?.refreshHardware === true ? '?refresh_hardware=true' : '';
+  const res = await apiFetch(`/api/coce/branches/${branchId}/panel-status${q}`);
+  if (!res.ok) throw new Error(await readError(res));
+  const data = (await res.json()) as BranchSnapshot;
+  return data;
 }
 
 export async function panelConnectBoard(branchId: string, boardId: number): Promise<void> {

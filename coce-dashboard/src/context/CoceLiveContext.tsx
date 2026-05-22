@@ -19,6 +19,7 @@ export type LiveBranchInfo = {
   boardsConnected?: number;
   boardsTotal?: number;
   lastEventTs?: number | null;
+  lastMessage?: { type: string; payload: Record<string, unknown> };
 };
 
 type CoceLiveContextValue = {
@@ -82,6 +83,7 @@ export function CoceLiveProvider({ children }: { children: ReactNode }) {
             status?: SucursalEstado;
             branch?: Record<string, unknown>;
             branches?: Record<string, unknown>[];
+            message?: { type?: string; payload?: Record<string, unknown> };
           };
           if (data.type === 'live_snapshot' && Array.isArray(data.branches)) {
             const next: Record<string, LiveBranchInfo> = {};
@@ -95,6 +97,12 @@ export function CoceLiveProvider({ children }: { children: ReactNode }) {
           if (data.type === 'branch_update' && data.branch) {
             const info = parseBranch(data.branch);
             if (!info.installationId) return;
+            if (data.message?.type) {
+              info.lastMessage = {
+                type: data.message.type,
+                payload: data.message.payload ?? {},
+              };
+            }
             setBranches((prev) => ({ ...prev, [info.installationId]: info }));
           }
         } catch {

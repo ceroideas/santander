@@ -45,6 +45,56 @@ def _coce_notify(event_type: str, payload: dict | None = None) -> None:
         pass
 
 
+_coce_status_last_emit: float = 0.0
+_COCE_STATUS_MIN_INTERVAL_S = 0.3
+
+
+def _build_status_payload() -> dict[str, Any]:
+    """Misma forma que GET /api/panel/status (estado en RAM, sin releer Modbus)."""
+    cfg_map = pms.get_boards_config_map()
+    return {
+        "boards": {
+            str(bid): {
+                "id": bid,
+                "config": {
+                    "name": cfg_map[bid]["name"],
+                    "host": cfg_map[bid]["host"],
+                    "port": cfg_map[bid]["port"],
+                    "slave_id": cfg_map[bid]["slave_id"],
+                    "modbus_mode": _modbus_mode(),
+                    "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
+                },
+                **io_state.get(bid, {}),
+                "input_overrides": input_overrides.get(bid, []),
+            }
+            for bid in _module_ids()
+            if bid in cfg_map
+        },
+        "modules_config": pms.get_full_config_for_api(),
+        "current_mode": current_mode,
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
+def _io_tuple(board_id: int) -> tuple[tuple[bool, ...], tuple[bool, ...], tuple[bool, ...]]:
+    st = io_state.get(board_id) or {}
+    return (
+        tuple(st.get("inputs_raw") or []),
+        tuple(st.get("inputs") or []),
+        tuple(st.get("outputs") or []),
+    )
+
+
+def _coce_notify_panel_status_debounced() -> None:
+    """Tras lectura Modbus: mismo JSON que /status?refresh_hardware=false para el COCE."""
+    global _coce_status_last_emit
+    now = time.time()
+    if now - _coce_status_last_emit < _COCE_STATUS_MIN_INTERVAL_S:
+        return
+    _coce_status_last_emit = now
+    _coce_notify("panel_status", _build_status_payload())
+
+
 def _rule_owns_operational_mode(rule: dict) -> bool:
     """Solo `enclavamiento` define el modo operativo global (`current_mode`). Pulso, manual, etc. no lo sustituyen."""
     return (rule.get("type") or "enclavamiento") == "enclavamiento"
@@ -609,6 +659,7 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
     cfg = _board_cfg(board_id)
     slave = cfg["slave_id"]
     ins, outs = pms.get_channels_for_module(board_id)
+    io_before = _io_tuple(board_id)
 
     def _run_bus_reads() -> None:
         out_batch = _read_holding_block_if_contiguous(client, slave, outs)
@@ -658,6 +709,8 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
         io_state[board_id]["last_update"] = datetime.now().isoformat()
         io_state[board_id]["error"] = None
         _read_io_fail_streak[board_id] = 0
+        if _io_tuple(board_id) != io_before:
+            _coce_notify_panel_status_debounced()
     except Exception as e:  # noqa: BLE001
         # Reintento único tras reconexión cuando el equipo resetea socket (WinError 10054).
         if not retried and not _connect_backoff_active(board_id):
@@ -1909,29 +1962,9 @@ def get_status(
     if run_auto_rules:
         # Si ya se refrescó hardware arriba, no repetir Modbus por cada regla (RTU).
         _evaluate_auto_rules(use_hardware_if_no_override=not refresh_hardware)
-    return {
-        "boards": {
-            str(bid): {
-                "id": bid,
-                "config": {
-                    "name": cfg_map[bid]["name"],
-                    "host": cfg_map[bid]["host"],
-                    "port": cfg_map[bid]["port"],
-                    "slave_id": cfg_map[bid]["slave_id"],
-                    "modbus_mode": _modbus_mode(),
-                    "serial_port": settings.modbus_serial_port if _is_rtu_mode() else None,
-                },
-                **io_state.get(bid, {}),
-                "input_overrides": input_overrides.get(bid, []),
-            }
-            for bid in _module_ids()
-            if bid in cfg_map
-        },
-        "modules_config": pms.get_full_config_for_api(),
-        "current_mode": current_mode,
-        "auto_rules_executed": run_auto_rules,
-        "timestamp": datetime.now().isoformat(),
-    }
+    payload = _build_status_payload()
+    payload["auto_rules_executed"] = run_auto_rules
+    return payload
 
 
 @router.post("/boards/{board_id}/connect")

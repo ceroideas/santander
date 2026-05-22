@@ -147,7 +147,7 @@ class LiveHub:
                 st.partial = {"currentMode": st.current_mode}
             elif msg_type in ("output_changed", "input_override", "board_connected", "board_disconnected"):
                 st.partial = payload
-            elif msg_type == "snapshot":
+            elif msg_type in ("snapshot", "panel_status"):
                 st.modbus = bool(payload.get("modbus"))
                 st.boards_connected = int(payload.get("boards_connected") or 0)
                 st.boards_total = int(payload.get("boards_total") or 0)

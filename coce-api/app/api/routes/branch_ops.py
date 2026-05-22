@@ -63,11 +63,17 @@ async def _audit_panel_op(
 async def snapshot(
     branch_id: str,
     request: Request,
+    refresh_hardware: bool = Query(
+        False,
+        description="Si true, relee Modbus en sucursal (lento). Por defecto RAM como dashboard local.",
+    ),
     user: str = Depends(get_current_username),
 ) -> dict:
     branch = _branch_or_404(branch_id)
     try:
-        data = await branch_proxy.fetch_branch_snapshot(branch)
+        data = await branch_proxy.fetch_branch_snapshot(
+            branch, refresh_hardware=refresh_hardware
+        )
         audit.record_audit(
             actor_username=user,
             action="branch.snapshot",
@@ -81,6 +87,44 @@ async def snapshot(
         audit.record_audit(
             actor_username=user,
             action="branch.snapshot",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=False,
+            detail={"error": str(e)},
+            ip_address=get_client_ip(request),
+        )
+        raise HTTPException(status_code=502, detail=str(e)) from e
+
+
+@router.get("/{branch_id}/panel-status")
+async def panel_status(
+    branch_id: str,
+    request: Request,
+    refresh_hardware: bool = Query(
+        False,
+        description="Igual que /api/panel/status en sucursal (false = rápido, estado en RAM).",
+    ),
+    user: str = Depends(get_current_username),
+) -> dict:
+    """Solo estado panel (IN/OUT/modo). Misma respuesta que el dashboard local, sin modos tablet."""
+    branch = _branch_or_404(branch_id)
+    try:
+        data = await branch_proxy.fetch_branch_panel_status(
+            branch, refresh_hardware=refresh_hardware
+        )
+        audit.record_audit(
+            actor_username=user,
+            action="branch.panel_status",
+            branch_id=branch_id,
+            branch_nombre=branch["nombre"],
+            success=True,
+            ip_address=get_client_ip(request),
+        )
+        return {"branchId": branch_id, **data}
+    except Exception as e:
+        audit.record_audit(
+            actor_username=user,
+            action="branch.panel_status",
             branch_id=branch_id,
             branch_nombre=branch["nombre"],
             success=False,
