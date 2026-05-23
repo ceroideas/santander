@@ -28,6 +28,7 @@ class BranchLiveState:
     boards_total: int = 0
     current_mode: Optional[str] = None
     partial: dict[str, Any] = field(default_factory=dict)
+    last_broadcast_status: Optional[BranchStatus] = None
 
     def to_public(self, status: BranchStatus) -> dict[str, Any]:
         return {
@@ -60,20 +61,26 @@ class LiveHub:
     def _timeout_s(self) -> float:
         return float(settings.branch_heartbeat_timeout_seconds)
 
+    def _heartbeat_fresh(self, st: BranchLiveState, now: float | None = None) -> bool:
+        ts = now if now is not None else time.time()
+        return bool(
+            st.last_heartbeat_ts
+            and (ts - st.last_heartbeat_ts) <= self._timeout_s()
+        )
+
     def derive_status(self, st: BranchLiveState) -> BranchStatus:
-        now = time.time()
-        if not st.ws_connected:
-            if st.last_heartbeat_ts and (now - st.last_heartbeat_ts) <= self._timeout_s():
-                pass
-            else:
-                return "apagado"
-        if st.last_heartbeat_ts and (now - st.last_heartbeat_ts) > self._timeout_s():
+        if not st.ws_connected or not self._heartbeat_fresh(st):
             return "apagado"
         if st.modbus and st.boards_connected > 0:
             return "operativo"
-        if st.ws_connected or st.last_heartbeat_ts:
-            return "no_operativo"
-        return "apagado"
+        return "no_operativo"
+
+    @staticmethod
+    def _clear_stale_branch_data(st: BranchLiveState) -> None:
+        st.modbus = False
+        st.boards_connected = 0
+        st.boards_total = 0
+        st.partial = {}
 
     async def ensure_branch(self, installation_id: str, nombre: str = "") -> BranchLiveState:
         async with self._lock:
@@ -108,6 +115,7 @@ class LiveHub:
             st = self._states.get(installation_id)
             if st:
                 st.ws_connected = False
+                self._clear_stale_branch_data(st)
         await self._maybe_broadcast(installation_id)
 
     async def register_dashboard(self, ws: WebSocket) -> None:
@@ -126,6 +134,7 @@ class LiveHub:
         if not isinstance(payload, dict):
             payload = {}
 
+        event: dict[str, Any] | None = None
         async with self._lock:
             st = self._states.get(installation_id) or BranchLiveState(
                 installation_id=installation_id, nombre=nombre
@@ -155,30 +164,68 @@ class LiveHub:
                 st.partial = payload
 
             self._states[installation_id] = st
-            status = self.derive_status(st)
-            event = {
-                "type": "branch_update",
-                "installationId": installation_id,
-                "status": status,
-                "branch": st.to_public(status),
-                "message": {"type": msg_type, "payload": payload},
-            }
+            event = self._branch_update_event(installation_id, st, msg_type, payload)
+            if event:
+                st.last_broadcast_status = event["status"]
 
-        await self._broadcast(event)
+        if event:
+            await self._broadcast(event)
+
+    def _branch_update_event(
+        self,
+        installation_id: str,
+        st: BranchLiveState,
+        msg_type: str | None = None,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        status = self.derive_status(st)
+        if status == st.last_broadcast_status and msg_type is None:
+            return None
+        event: dict[str, Any] = {
+            "type": "branch_update",
+            "installationId": installation_id,
+            "status": status,
+            "branch": st.to_public(status),
+        }
+        if msg_type is not None:
+            event["message"] = {"type": msg_type, "payload": payload or {}}
+        return event
 
     async def _maybe_broadcast(self, installation_id: str) -> None:
+        event: dict[str, Any] | None = None
         async with self._lock:
             st = self._states.get(installation_id)
             if not st:
                 return
-            status = self.derive_status(st)
-            event = {
-                "type": "branch_update",
-                "installationId": installation_id,
-                "status": status,
-                "branch": st.to_public(status),
-            }
-        await self._broadcast(event)
+            event = self._branch_update_event(installation_id, st)
+            if event:
+                st.last_broadcast_status = event["status"]
+        if event:
+            await self._broadcast(event)
+
+    async def status_sweep_loop(self) -> None:
+        interval = min(15.0, max(5.0, self._timeout_s() / 6))
+        while True:
+            try:
+                await asyncio.sleep(interval)
+                await self._sweep_statuses()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.warning("status sweep: %s", e)
+
+    async def _sweep_statuses(self) -> None:
+        if self._viewer_count <= 0:
+            return
+        events: list[dict[str, Any]] = []
+        async with self._lock:
+            for installation_id, st in self._states.items():
+                event = self._branch_update_event(installation_id, st)
+                if event:
+                    st.last_broadcast_status = event["status"]
+                    events.append(event)
+        for event in events:
+            await self._broadcast(event)
 
     async def _broadcast(self, event: dict[str, Any]) -> None:
         if self._viewer_count <= 0:

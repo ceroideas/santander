@@ -1,6 +1,7 @@
 """COCE API — servidor central FastAPI."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,12 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.schema import ensure_schema
 from app.api.routes import auth, branches, branch_ops, audit, ws
+from app.services.live_hub import live_hub
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     ensure_schema()
+    sweep_task = asyncio.create_task(live_hub.status_sweep_loop())
     yield
+    sweep_task.cancel()
+    try:
+        await sweep_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
