@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import type { PanelBoardState, PanelModeRule, Sucursal } from "../types";
 import {
@@ -8,8 +14,15 @@ import {
   getBranch,
   setBranchMode,
 } from "../api/coceClient";
-import { useCoceLive } from "../context/CoceLiveContext";
+import { resolveSucursalEstado, useCoceLive } from "../context/CoceLiveContext";
 import { applyLivePatch } from "../utils/applyLivePatch";
+import {
+  DOOR_BOARD_CONFIG,
+  DOOR_STATE_HINTS,
+  DOOR_STATE_LABELS,
+  deriveDoorState,
+  type DoorState,
+} from "../utils/deriveDoorState";
 import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 import type { PanelModuleConfig } from "../types";
 import { BoardIoPanel } from "./BoardIoPanel";
@@ -128,15 +141,6 @@ export function DashboardSucursal() {
     );
   }
 
-  type DoorState = "abierta" | "cerrada" | "bloqueada" | "emergencia";
-
-  const DOOR_STATE_LABELS: Record<DoorState, string> = {
-    abierta: "Abierta",
-    cerrada: "Cerrada",
-    bloqueada: "Bloqueada",
-    emergencia: "Emergencia",
-  };
-
   function DoorIcon() {
     return (
       <svg
@@ -188,7 +192,7 @@ export function DashboardSucursal() {
         </div>
         <div className="door-status-card-body">
           <h3 className="door-status-card-title">{name}</h3>
-          <p className="door-status-card-label">Estado general</p>
+          <p className="door-status-card-label">Estado de puerta</p>
           <span className={`door-status-badge door-status-badge--${state}`}>
             <span className="door-status-badge-dot" aria-hidden />
             {DOOR_STATE_LABELS[state]}
@@ -456,6 +460,18 @@ export function DashboardSucursal() {
     });
   }, [id, live.connected, liveBranch?.lastMessage]);
 
+  const doors = useMemo(() => {
+    if (!data) return [];
+    return DOOR_BOARD_CONFIG.map((door) => {
+      const entry = data.boards.find((b) => b.id === door.boardId);
+      const state = deriveDoorState(entry?.data);
+      return {
+        ...door,
+        state,
+      };
+    });
+  }, [data]);
+
   async function activateMode(ruleKey: string) {
     if (!sucursal || !id) return;
     setBusyKey(ruleKey);
@@ -479,8 +495,12 @@ export function DashboardSucursal() {
   }
 
   const baseLabel = `${sucursal.useHttps ? "https" : "http"}://${sucursal.host}:${sucursal.port}`;
-  const estado = getSucursalEstado(sucursal);
-  const estadoLabel = SUCURSAL_ESTADO_LABELS[estado];
+  const estadoLive = resolveSucursalEstado(
+    sucursal.id,
+    getSucursalEstado(sucursal),
+    live,
+  );
+  const estadoLabel = SUCURSAL_ESTADO_LABELS[estadoLive];
 
   // Maqueta: versiones y conectividad fina hasta API COCE / heartbeat
   const PC_SOFTWARE_VERSION = "v1.3.0";
@@ -490,14 +510,8 @@ export function DashboardSucursal() {
   const TABLET_AVAILABLE_VERSION = "v2.9.0";
   const pcUpdateAvailable = true;
   const tabletUpdateAvailable = true;
-  const pcConnected = !!data && !error;
-  const tabletConnected = !!data && !error;
-
-  // Maqueta: estado de puertas hasta API / panel en tiempo real
-  const doorsMock: Array<{ id: string; name: string; state: DoorState }> = [
-    { id: "calle", name: "Puerta calle", state: "cerrada" },
-    { id: "oficina", name: "Puerta oficina", state: "bloqueada" },
-  ];
+  const panelReachable = !!data && !error;
+  const tabletConnected = panelReachable;
 
   return (
     <div className="content-view">
@@ -515,7 +529,7 @@ export function DashboardSucursal() {
         </div>
 
         <div
-          className={`dashboard-sucursal-status dashboard-sucursal-status--${estado}`}
+          className={`dashboard-sucursal-status dashboard-sucursal-status--${estadoLive}`}
           aria-label={`Estado: ${estadoLabel}`}
         >
           <span className="dashboard-sucursal-status-dot" aria-hidden />
@@ -606,21 +620,9 @@ export function DashboardSucursal() {
             <DeviceCard
               title="PC industrial"
               icon={<PcIcon />}
-              statusLabel={
-                loading && !data
-                  ? "Comprobando…"
-                  : pcConnected
-                    ? "Operativo"
-                    : "Apagado"
-              }
-              statusVariant={
-                loading && !data
-                  ? "no_operativo"
-                  : pcConnected
-                    ? "operativo"
-                    : "apagado"
-              }
-              version={pcConnected ? PC_SOFTWARE_VERSION : "—"}
+              statusLabel={estadoLabel}
+              statusVariant={estadoLive}
+              version={panelReachable ? PC_SOFTWARE_VERSION : "—"}
               updateAvailable={pcUpdateAvailable}
               availableVersion={PC_AVAILABLE_VERSION}
               showRestart
@@ -662,7 +664,7 @@ export function DashboardSucursal() {
               <h2>Estado de las puertas</h2>
             </div>
             <div className="doors-grid">
-              {doorsMock.map((door) => (
+              {doors.map((door) => (
                 <DoorStatusCard
                   key={door.id}
                   name={door.name}
@@ -820,8 +822,11 @@ export function DashboardSucursal() {
                           board={b}
                           moduleConfig={moduleForBoard(data.modulesConfig, bid)}
                           canControl={
-                            !!(sucursal?.usuarioPanel?.trim() &&
-                              (sucursal.hasPasswordPanel || sucursal.passwordPanel))
+                            !!(
+                              sucursal?.usuarioPanel?.trim() &&
+                              (sucursal.hasPasswordPanel ||
+                                sucursal.passwordPanel)
+                            )
                           }
                           onRefresh={refresh}
                         />

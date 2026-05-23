@@ -816,8 +816,15 @@ th {
   border-left-color: var(--warn);
 }
 
-.door-status-card--emergencia {
-  border-left-color: var(--danger);
+.door-status-card--no_operativa {
+  border-left-color: #94a3b8;
+}
+
+.door-status-card-hint {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.35;
 }
 
 .door-status-card-icon {
@@ -876,8 +883,8 @@ th {
   color: var(--warn);
 }
 
-.door-status-badge--emergencia {
-  color: var(--danger);
+.door-status-badge--no_operativa {
+  color: #64748b;
 }
 
 .dashboard-panels-grid {
