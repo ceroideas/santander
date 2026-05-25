@@ -1005,6 +1005,25 @@ def _read_input_effective(
     return io_state[board_id]["inputs"][idx]
 
 
+def _horario_blocker_suppressed_by_operative_mode(mode_key: str) -> bool:
+    """
+    Con un horario operativo distinto, no bloquear por cables «apagados» al activar ese modo
+    (p. ej. en Esclusa ignorar IN1 Automático aunque el bus siga alto).
+    En Automático sí cuentan los IN de otros horarios (p. ej. Esclusa) para bloquear radares.
+    """
+    if not current_mode or not mode_key:
+        return False
+    cur_rule = rules_config.get(current_mode) or {}
+    deact = cur_rule.get("deactivate_modes") or []
+    blocker_rule = rules_config.get(mode_key) or {}
+    blocker_trigger = blocker_rule.get("trigger")
+    if not isinstance(blocker_trigger, str) or blocker_trigger not in deact:
+        return False
+    if current_mode == "horario_automatico":
+        return False
+    return True
+
+
 def _blocked_signal_active(
     code: str,
     *,
@@ -1012,7 +1031,7 @@ def _blocked_signal_active(
     use_overrides: bool = True,
     physical_inputs: bool = False,
 ) -> bool:
-    """True si la condición de bloqueo está activa: IN_* (físico o efectivo según flags); OUT_* leyendo salidas."""
+    """True si la condición de bloqueo está activa. IN: efectivo panel (override manda); OUT: salidas."""
     code = (code or "").strip()
     if not code:
         return False
@@ -1031,21 +1050,22 @@ def _blocked_signal_active(
             return False
         return bool(outs[channel - 1])
     mode_key = in_trigger_to_mode.get(code)
-    if mode_key is not None:
-        # Horario (IN1–IN7): bloquea si el cable/override está activo O si ese modo es el operativo vigente.
-        if mode_key.startswith(HORARIO_MODE_KEY_PREFIX) and current_mode == mode_key:
+    if mode_key is not None and mode_key.startswith(HORARIO_MODE_KEY_PREFIX):
+        if current_mode == mode_key:
             return True
+        if _horario_blocker_suppressed_by_operative_mode(mode_key):
+            return False
         return _read_input_effective(
             code,
             use_hardware_if_no_override=use_hardware_if_no_override,
             use_overrides=use_overrides,
-            physical_inputs=physical_inputs,
+            physical_inputs=False,
         )
     return _read_input_effective(
         code,
         use_hardware_if_no_override=use_hardware_if_no_override,
         use_overrides=use_overrides,
-        physical_inputs=physical_inputs,
+        physical_inputs=False,
     )
 
 
@@ -1578,7 +1598,6 @@ def _in_code_for_board_channel(board_id: int, channel: int) -> str:
 
 
 def _blocked_inputs_for_rule(rule: dict) -> List[str]:
-    phy = bool(settings.panel_rules_triggers_use_physical_inputs)
     return [
         code
         for code in rule.get("blocked_if_active") or []
@@ -1586,7 +1605,6 @@ def _blocked_inputs_for_rule(rule: dict) -> List[str]:
             code,
             use_hardware_if_no_override=True,
             use_overrides=True,
-            physical_inputs=phy,
         )
     ]
 
