@@ -63,6 +63,7 @@ def _build_status_payload() -> dict[str, Any]:
         },
         "modules_config": pms.get_full_config_for_api(),
         "current_mode": current_mode,
+        "active_toggle_rules": sorted(active_toggle_rules),
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -125,6 +126,22 @@ def _rule_owns_operational_mode(rule: dict, rule_key: str) -> bool:
 
 def _rule_is_emergency_operational(rule_key: str) -> bool:
     return rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _is_toggle_enclavamiento_rule(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """
+    Enclavamiento tipo interruptor: ON/OFF al pulsar (lateral o IN), sin mantener apretado.
+    Excluye solo horarios (IN1–IN7) e incendio global. El resto de `enclavamiento` en JSON es interruptor.
+    Los «timbre» (pulso N s) son `pulso_5_sg`, no entran aquí.
+    """
+    r = rule if rule is not None else rules_config.get(rule_key) or {}
+    if r.get("type") != "enclavamiento":
+        return False
+    if rule_key.startswith(HORARIO_MODE_KEY_PREFIX):
+        return False
+    if _rule_is_emergency_operational(rule_key):
+        return False
+    return True
 
 
 def _pymodbus_client_kwargs() -> Dict[str, Any]:
@@ -272,6 +289,7 @@ mode_latches: Dict[str, bool] = {}
 in_trigger_to_mode: Dict[str, str] = {}
 current_mode: Optional[str] = None
 previous_operational_mode: Optional[str] = None
+active_toggle_rules: set[str] = set()
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
@@ -349,6 +367,7 @@ _sync_rules_runtime(rules_config)
 PANEL_STATE_OVERRIDES_KEY = "panel_input_overrides"
 PANEL_STATE_CURRENT_MODE_KEY = "panel_current_mode"
 PANEL_STATE_PREVIOUS_MODE_KEY = "panel_previous_operational_mode"
+PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY = "panel_active_toggle_rules"
 
 
 def _ensure_panel_state_table() -> None:
@@ -404,6 +423,22 @@ def _persist_previous_operational_mode_to_db() -> None:
     )
 
 
+def _persist_active_toggle_rules_to_db() -> None:
+    _save_panel_state_value(
+        PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY,
+        json.dumps({"active_toggle_rules": sorted(active_toggle_rules)}),
+    )
+
+
+def _notify_toggle_rules_changed() -> None:
+    _persist_active_toggle_rules_to_db()
+    _coce_notify(
+        "toggle_rules_changed",
+        {"active_toggle_rules": sorted(active_toggle_rules)},
+    )
+    _publish_panel_status_debounced()
+
+
 def _stash_operational_mode_before_emergency() -> None:
     """Guarda el horario vigente antes de activar incendio/emergencia (como la tablet)."""
     global previous_operational_mode
@@ -444,7 +479,7 @@ def _restore_operational_mode_after_emergency() -> None:
 
 
 def _load_persisted_panel_state() -> None:
-    global current_mode, previous_operational_mode
+    global current_mode, previous_operational_mode, active_toggle_rules
     _sync_runtime_from_db()
     raw_overrides = _load_panel_state_value(PANEL_STATE_OVERRIDES_KEY)
     if raw_overrides:
@@ -479,6 +514,21 @@ def _load_persisted_panel_state() -> None:
             prev_value = prev_obj.get("previous_operational_mode")
             if isinstance(prev_value, str) or prev_value is None:
                 previous_operational_mode = prev_value
+        except Exception:  # noqa: BLE001
+            pass
+
+    raw_toggles = _load_panel_state_value(PANEL_STATE_ACTIVE_TOGGLE_RULES_KEY)
+    if raw_toggles:
+        try:
+            tobj = json.loads(raw_toggles)
+            keys = tobj.get("active_toggle_rules")
+            if isinstance(keys, list):
+                active_toggle_rules = {
+                    str(k)
+                    for k in keys
+                    if isinstance(k, str) and k in rules_config
+                    and _is_toggle_enclavamiento_rule(k)
+                }
         except Exception:  # noqa: BLE001
             pass
 
@@ -962,7 +1012,9 @@ def _blocked_signal_active(
         return bool(outs[channel - 1])
     mode_key = in_trigger_to_mode.get(code)
     if mode_key is not None:
-        # IN de horario/emergencia en "No actúa si está activo": cable físico (o override ON).
+        # Horario (IN1–IN7): bloquea si el cable/override está activo O si ese modo es el operativo vigente.
+        if mode_key.startswith(HORARIO_MODE_KEY_PREFIX) and current_mode == mode_key:
+            return True
         return _read_input_effective(
             code,
             use_hardware_if_no_override=use_hardware_if_no_override,
@@ -1393,6 +1445,10 @@ def _evaluate_pulse_5_sg_rule(
     ]
     desired = bool(trigger_active) and not blocked_active_codes
     last = bool(runtime.get("last_follow_on"))
+    rising = bool(trigger_active) and not bool(runtime.get("last_trigger_active"))
+
+    if rising and blocked_active_codes:
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
 
     if manual:
         if blocked_active_codes:
@@ -1482,6 +1538,133 @@ def _trigger_activated_by_panel_override(trigger_code: str, *, manual: bool = Fa
         return True
     board_id, channel = _parse_in_code(trigger_code)
     return input_overrides[board_id][channel - 1] is True
+
+
+def _apply_toggle_enclavamiento_on(
+    rule_key: str,
+    rule: dict,
+    trigger_code: str,
+    *,
+    activated_by_panel_override: bool,
+    apply_outputs_to_hardware: bool,
+    blocked_active_codes: List[str],
+) -> dict:
+    """Enciende salidas de una actuación tipo interruptor y la registra en `active_toggle_rules`."""
+    global active_toggle_rules
+    by_panel = activated_by_panel_override
+    _apply_enclavamiento_mode_activation(
+        rule, trigger_code, activated_by_panel_override=by_panel
+    )
+    origin_tag = f"toggle_on:{rule_key}"
+    skipped_disconnected: List[str] = []
+    for do_code in rule.get("activate_outputs", []):
+        board_id, channel = _parse_out_code(do_code)
+        if apply_outputs_to_hardware:
+            if not io_state[board_id]["connected"]:
+                _connect_board(board_id)
+            if not _write_output_if_connected(
+                board_id, channel, True, out_code=do_code, origin=origin_tag
+            ):
+                skipped_disconnected.append(do_code)
+        else:
+            _, outs = pms.get_channels_for_module(board_id)
+            if 1 <= channel <= len(outs):
+                io_state[board_id]["outputs"][channel - 1] = True
+    _apply_deactivate_outputs(
+        rule, apply_outputs_to_hardware, rule_key=rule_key, origin=origin_tag
+    )
+    active_toggle_rules.add(rule_key)
+    _notify_toggle_rules_changed()
+    rt = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    rt["last_executed_at"] = datetime.now().isoformat()
+    add_event("OK", f"Actuación interruptor ON: {rule_key}", 1)
+    return {
+        "executed": True,
+        "toggle_active": True,
+        "toggle_action": "on",
+        "mode": current_mode,
+        "trigger_input_active": True,
+        "blocked_inputs": blocked_active_codes,
+        "outputs_activated": rule.get("activate_outputs", []),
+        "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "outputs_skipped_disconnected": skipped_disconnected,
+        "timestamp": rt["last_executed_at"],
+    }
+
+
+def _apply_toggle_enclavamiento_off(
+    rule_key: str,
+    rule: dict,
+    *,
+    apply_outputs_to_hardware: bool,
+    blocked_active_codes: Optional[List[str]] = None,
+) -> dict:
+    """Apaga salidas y quita la actuación del array de interruptores activos."""
+    global active_toggle_rules
+    origin_tag = f"toggle_off:{rule_key}"
+    _restore_temp_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware, origin=origin_tag
+    )
+    for out_code in rule.get("activate_outputs", []):
+        b, ch = _parse_out_code(out_code)
+        if apply_outputs_to_hardware:
+            if io_state.get(b, {}).get("connected"):
+                _write_output_if_connected(
+                    b, ch, False, out_code=out_code, origin=origin_tag
+                )
+        else:
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = False
+    for out_code in rule.get("deactivate_outputs", []):
+        b, ch = _parse_out_code(out_code)
+        if apply_outputs_to_hardware:
+            if not io_state[b]["connected"]:
+                _connect_board(b)
+            _write_output_if_connected(
+                b, ch, True, out_code=out_code, origin=origin_tag
+            )
+        else:
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = True
+    trigger_code = rule.get("trigger")
+    if isinstance(trigger_code, str) and trigger_code:
+        mode_latches[trigger_code] = False
+        tb, tch = _parse_in_code(trigger_code)
+        input_overrides[tb][tch - 1] = None
+    active_toggle_rules.discard(rule_key)
+    _persist_overrides_to_db()
+    _notify_toggle_rules_changed()
+    rt = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    rt["last_executed_at"] = datetime.now().isoformat()
+    add_event("OK", f"Actuación interruptor OFF: {rule_key}", 1)
+    return {
+        "executed": True,
+        "toggle_active": False,
+        "toggle_action": "off",
+        "mode": current_mode,
+        "blocked_inputs": blocked_active_codes or [],
+        "outputs_activated": [],
+        "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "timestamp": rt["last_executed_at"],
+    }
 
 
 def _apply_enclavamiento_mode_activation(
@@ -1582,6 +1765,24 @@ def _evaluate_trigger_rule(
             "trigger_input_active": trigger_active,
         }
 
+    if _is_toggle_enclavamiento_rule(rule_key, rule):
+        if rule_key in active_toggle_rules:
+            return _apply_toggle_enclavamiento_off(
+                rule_key,
+                rule,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                blocked_active_codes=blocked_active_codes,
+            )
+        by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
+        return _apply_toggle_enclavamiento_on(
+            rule_key,
+            rule,
+            trigger_code,
+            activated_by_panel_override=by_panel,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+            blocked_active_codes=blocked_active_codes,
+        )
+
     by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
     _apply_enclavamiento_mode_activation(
         rule, trigger_code, activated_by_panel_override=by_panel
@@ -1677,6 +1878,8 @@ def _deactivate_rule_on_fall(
     if not rule:
         return False
     if rule.get("type") != "enclavamiento" or not rule.get("enabled", True):
+        return False
+    if _is_toggle_enclavamiento_rule(rule_key, rule):
         return False
     runtime = rules_runtime.setdefault(
         rule_key,
@@ -1890,6 +2093,25 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
             "follow_mode": True,
             "mode": current_mode,
         }
+
+    if _is_toggle_enclavamiento_rule(rule_key, rule):
+        if rule_key in active_toggle_rules:
+            result = _apply_toggle_enclavamiento_off(
+                rule_key, rule, apply_outputs_to_hardware=apply_outputs_to_hardware
+            )
+        else:
+            trigger_code = rule.get("trigger") or "IN_01_01"
+            result = _apply_toggle_enclavamiento_on(
+                rule_key,
+                rule,
+                trigger_code,
+                activated_by_panel_override=True,
+                apply_outputs_to_hardware=apply_outputs_to_hardware,
+                blocked_active_codes=blocked_active_codes,
+            )
+        result["rule"] = rule_key
+        result["trigger"] = rule.get("trigger")
+        return result
 
     trigger_code = rule.get("trigger") or "IN_01_01"
     _apply_enclavamiento_mode_activation(
@@ -2475,6 +2697,13 @@ def set_input_override(action: InputOverrideAction):
             "override": action.state,
         },
     )
+    if settings.auto_rules_background_enabled:
+        try:
+            background_auto_rules_cycle(
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return {"board_id": action.board_id, "channel": action.channel, "override": action.state}
 
 
@@ -2493,6 +2722,13 @@ def clear_input_override(board_id: int, channel: int):
         "input_override",
         {"board_id": board_id, "channel": channel, "override": None},
     )
+    if settings.auto_rules_background_enabled:
+        try:
+            background_auto_rules_cycle(
+                deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
+            )
+        except Exception:  # noqa: BLE001
+            pass
     return {"board_id": board_id, "channel": channel, "override": None}
 
 
@@ -2500,6 +2736,7 @@ def clear_input_override(board_id: int, channel: int):
 def get_rules_state():
     return {
         "current_mode": current_mode,
+        "active_toggle_rules": sorted(active_toggle_rules),
         "mode_latches": mode_latches,
         "rules": rules_config,
         "runtime": rules_runtime,

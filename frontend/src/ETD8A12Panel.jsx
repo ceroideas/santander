@@ -68,6 +68,14 @@ export const colors = {
 
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
+
+/** Enclavamientos interruptor (verde, cierres, apertura remota COCE…), no horarios ni incendio. */
+function isToggleEnclavamiento(ruleKey, rule) {
+  if (!rule || rule.type !== "enclavamiento") return false;
+  if (ruleKey.startsWith("horario_")) return false;
+  if (ruleKey === "senal_de_incendio_activada") return false;
+  return true;
+}
 /** Unit ID Modbus 0-255; no usar `n || 1` (0 válido; NaN no debe volverse 1). */
 function normalizeSlaveId(raw, fallback = 1) {
   const s = parseInt(String(raw).trim(), 10);
@@ -1606,6 +1614,7 @@ export default function ETD8A12Panel() {
   const [rulesJson, setRulesJson] = useState("");
   const [rulesMap, setRulesMap] = useState({});
   const [selectedMode, setSelectedMode] = useState(null);
+  const [activeToggleRules, setActiveToggleRules] = useState([]);
   const [globalLoadingCount, setGlobalLoadingCount] = useState(0);
   const [initialStatusLoaded, setInitialStatusLoaded] = useState(false);
   const [initialRulesLoaded, setInitialRulesLoaded] = useState(false);
@@ -1788,6 +1797,9 @@ export default function ETD8A12Panel() {
       setBoards((p) => ({ ...p, ...next }));
       if (d.current_mode && rulesMapRef.current[d.current_mode]) {
         setSelectedMode(d.current_mode);
+      }
+      if (Array.isArray(d.active_toggle_rules)) {
+        setActiveToggleRules(d.active_toggle_rules);
       }
     };
     mergeStatusRef.current = mergeStatusPayload;
@@ -2194,8 +2206,25 @@ export default function ETD8A12Panel() {
           method: "POST",
         });
         if (result?.executed) {
-          addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
-          setSelectedMode(ruleKey);
+          const rule = rulesMapRef.current[ruleKey];
+          if (isToggleEnclavamiento(ruleKey, rule)) {
+            const on = result.toggle_action === "on" || result.toggle_active === true;
+            setActiveToggleRules((prev) => {
+              const s = new Set(prev);
+              if (on) s.add(ruleKey);
+              else s.delete(ruleKey);
+              return [...s];
+            });
+            addUI(
+              "OK",
+              on
+                ? `Actuación ON: ${toModeLabel(ruleKey)}`
+                : `Actuación OFF: ${toModeLabel(ruleKey)}`,
+            );
+          } else {
+            addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
+            if (ruleKey.startsWith("horario_")) setSelectedMode(ruleKey);
+          }
           void afterPanelMutation();
           return;
         }
@@ -2502,7 +2531,13 @@ export default function ETD8A12Panel() {
                       rulesMap[ruleKey]?.type === "enclavamiento",
                   )
                   .map((ruleKey) => {
-                  const isActive = selectedMode === ruleKey;
+                  const rule = rulesMap[ruleKey];
+                  const isHorarioMode = ruleKey.startsWith("horario_");
+                  const isModeActive =
+                    isHorarioMode && selectedMode === ruleKey;
+                  const isToggleOn =
+                    isToggleEnclavamiento(ruleKey, rule) &&
+                    activeToggleRules.includes(ruleKey);
                   return (
                     <button
                       key={ruleKey}
@@ -2512,18 +2547,32 @@ export default function ETD8A12Panel() {
                         textAlign: "left",
                         padding: "8px 10px",
                         borderRadius: 8,
-                        border: `1px solid ${isActive ? "" : C.border}`,
-                        background: isActive
+                        border: `1px solid ${
+                          isModeActive
+                            ? C.red
+                            : isToggleOn
+                              ? C.blue
+                              : C.border
+                        }`,
+                        background: isModeActive
                           ? "linear-gradient(90deg, #E50914 0%, #B20710 100%)"
-                          : C.white,
-                        color: isActive ? C.white : colors.textSecondary,
+                          : isToggleOn
+                            ? C.blueLight
+                            : C.white,
+                        color: isModeActive
+                          ? C.white
+                          : isToggleOn
+                            ? C.blue
+                            : colors.textSecondary,
                         cursor: "pointer",
                         fontSize: 12,
-                        fontWeight: isActive ? 700 : 500,
+                        fontWeight: isModeActive || isToggleOn ? 700 : 500,
                       }}
                     >
                       <FontAwesomeIcon
-                        color={isActive ? C.white : C.red}
+                        color={
+                          isModeActive ? C.white : isToggleOn ? C.blue : C.red
+                        }
                         icon={faSliders}
                       />
                       {toModeLabel(ruleKey)}
