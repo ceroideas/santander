@@ -1,0 +1,338 @@
+id,created_at,severity,event_type,message,source,actor_principal,actor_username,board_id
+32769,2026-05-25T08:47:18.690176+00:00,OK,general,Regla ejecutada: horario_carga_cajero,system,system,,1
+32768,2026-05-25T08:45:28.144928+00:00,INFO,general,Modo desactivado por trigger OFF: horario_autoservicio,system,system,,1
+32767,2026-05-25T08:45:21.964380+00:00,OK,general,Regla ejecutada: horario_autoservicio,system,system,,1
+32766,2026-05-25T08:45:17.448245+00:00,INFO,general,Modo desactivado por trigger OFF: horario_cerrado,system,system,,1
+32765,2026-05-25T08:45:14.046539+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32764,2026-05-25T08:44:55.242172+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32763,2026-05-25T08:44:52.241327+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32762,2026-05-25T08:44:49.119866+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32761,2026-05-25T08:44:45.679155+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32760,2026-05-25T08:42:51.950280+00:00,INFO,general,"Restauradas salidas (estaban ON antes de la regla): OUT_02_01, OUT_02_02",system,system,,1
+32759,2026-05-25T08:42:46.187203+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32758,2026-05-25T08:42:43.146154+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32757,2026-05-25T08:42:37.091796+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32756,2026-05-25T08:42:34.089171+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32755,2026-05-25T08:42:18.979775+00:00,OK,general,Regla ejecutada: horario_carga_cajero,system,system,,1
+32754,2026-05-25T08:41:47.488048+00:00,INFO,general,Modo desactivado por trigger OFF: horario_carga_cajero,system,system,,1
+32753,2026-05-25T08:41:44.319754+00:00,OK,general,Regla ejecutada: horario_carga_cajero,system,system,,1
+32752,2026-05-25T08:37:36.670868+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32751,2026-05-25T08:37:33.680209+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32750,2026-05-25T08:37:33.040164+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32749,2026-05-25T08:37:32.948574+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32748,2026-05-25T08:37:29.918224+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32747,2026-05-25T08:37:29.798281+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32746,2026-05-25T08:32:44.649274+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32745,2026-05-25T08:32:41.604705+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32744,2026-05-25T08:32:38.592544+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32743,2026-05-25T08:32:38.472243+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32742,2026-05-25T08:32:38.400458+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32741,2026-05-25T08:32:35.316534+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32740,2026-05-25T08:32:32.347701+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32739,2026-05-25T08:32:32.227654+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32738,2026-05-25T08:32:11.491151+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32737,2026-05-25T08:32:08.449203+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32736,2026-05-25T08:32:05.402681+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32735,2026-05-25T08:32:05.322532+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32734,2026-05-25T08:32:02.279055+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32733,2026-05-25T08:32:02.158730+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32732,2026-05-25T08:24:59.850331+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32731,2026-05-25T08:24:59.730088+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32730,2026-05-25T08:24:56.729755+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32729,2026-05-25T08:24:56.609575+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32728,2026-05-25T08:22:50.298122+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32727,2026-05-25T08:22:50.178141+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32726,2026-05-25T08:22:38.289646+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32725,2026-05-25T08:22:38.170021+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32724,2026-05-25T08:22:32.266162+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32723,2026-05-25T08:22:32.186998+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32722,2026-05-25T08:22:29.143148+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32721,2026-05-25T08:22:29.063028+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32720,2026-05-25T08:22:17.251454+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32719,2026-05-25T08:22:16.210621+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32718,2026-05-25T08:22:10.245223+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32717,2026-05-25T08:22:07.123030+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32716,2026-05-25T08:22:04.029222+00:00,INFO,general,Modo desactivado por trigger OFF: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32715,2026-05-25T08:22:00.907176+00:00,OK,general,Regla ejecutada: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32714,2026-05-25T08:20:53.259444+00:00,OK,general,Regla ejecutada: horario_extendido,system,system,,1
+32713,2026-05-25T08:20:51.691961+00:00,INFO,general,Modo desactivado por trigger OFF: horario_esclusa,system,system,,1
+32712,2026-05-25T08:20:45.662835+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32711,2026-05-25T08:20:39.740080+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32710,2026-05-25T08:20:10.442387+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32709,2026-05-25T08:20:10.361205+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32708,2026-05-25T08:20:07.400625+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32707,2026-05-25T08:20:07.237563+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32706,2026-05-25T08:20:00.999147+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32705,2026-05-25T08:19:57.996791+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32704,2026-05-25T08:19:57.826844+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32703,2026-05-25T08:19:54.823541+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32702,2026-05-25T08:08:29.151396+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32701,2026-05-25T08:08:26.110096+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32700,2026-05-25T08:08:20.100033+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina_esclusa,system,system,,1
+32699,2026-05-25T08:08:17.097403+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina_esclusa,system,system,,1
+32698,2026-05-25T08:08:11.264051+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32697,2026-05-25T08:08:11.212618+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_exterior,system,system,,1
+32696,2026-05-25T08:08:08.222336+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32695,2026-05-25T08:08:08.090104+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_exterior,system,system,,1
+32694,2026-05-25T08:08:02.099048+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32693,2026-05-25T08:08:02.044786+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_exterior,system,system,,1
+32692,2026-05-25T08:07:59.057661+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32691,2026-05-25T08:07:58.080887+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_exterior,system,system,,1
+32690,2026-05-25T08:07:39.974758+00:00,OK,general,Regla ejecutada: horario_esclusa,system,system,,1
+32689,2026-05-25T08:07:32.522405+00:00,INFO,general,Modo desactivado por trigger OFF: horario_cerrado,system,system,,1
+32688,2026-05-25T08:07:14.515907+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32687,2026-05-25T08:07:12.958296+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32686,2026-05-25T08:06:17.223289+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32685,2026-05-25T08:04:32.985925+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32684,2026-05-25T08:04:32.865855+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32683,2026-05-25T08:04:26.183468+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_calle,system,system,,1
+32682,2026-05-25T08:04:25.942815+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32681,2026-05-25T08:04:25.822663+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32680,2026-05-25T07:58:50.050455+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32679,2026-05-25T07:58:47.008416+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32678,2026-05-25T07:58:46.922786+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32677,2026-05-25T07:58:44.040190+00:00,INFO,general,Modo desactivado por trigger OFF: cierres_mecanicos_puerta_oficina,system,system,,1
+32676,2026-05-25T07:58:40.924841+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32675,2026-05-25T07:58:40.844943+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32674,2026-05-25T07:58:40.757959+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32673,2026-05-25T07:58:34.642033+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32672,2026-05-25T07:58:34.522062+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32671,2026-05-25T07:58:25.826330+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_oficina,system,system,,1
+32670,2026-05-25T07:58:22.593944+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32669,2026-05-25T07:58:18.019270+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32668,2026-05-25T07:58:12.070839+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32667,2026-05-25T07:58:02.746480+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32666,2026-05-25T07:57:47.801241+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32665,2026-05-25T07:57:43.269409+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32664,2026-05-25T07:57:40.034338+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32663,2026-05-25T07:57:32.581096+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32662,2026-05-25T07:57:13.803336+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32661,2026-05-25T07:57:06.242855+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32660,2026-05-25T07:56:57.120862+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32659,2026-05-25T07:56:43.666996+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32658,2026-05-25T07:56:37.547922+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32657,2026-05-25T07:56:24.207695+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32656,2026-05-25T07:56:17.971523+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32655,2026-05-25T07:56:07.868270+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_oficina,system,system,,1
+32654,2026-05-25T07:56:04.533224+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32653,2026-05-25T07:55:36.396001+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32652,2026-05-25T07:55:36.315910+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32651,2026-05-25T07:55:33.313786+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32650,2026-05-25T07:55:33.233866+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32649,2026-05-25T07:55:03.775187+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32648,2026-05-25T07:55:03.695049+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32647,2026-05-25T07:55:00.733444+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32646,2026-05-25T07:55:00.653405+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32645,2026-05-25T07:54:57.651174+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32644,2026-05-25T07:54:57.571098+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32643,2026-05-25T07:54:54.128705+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32642,2026-05-25T07:54:54.048774+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32641,2026-05-25T07:54:51.006187+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32640,2026-05-25T07:54:50.886064+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32639,2026-05-25T07:54:44.801280+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32638,2026-05-25T07:54:44.721178+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32637,2026-05-25T07:54:29.915537+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_calle,system,system,,1
+32636,2026-05-25T07:54:17.783558+00:00,OK,general,Regla ejecutada: horario_carga_cajero,system,system,,1
+32635,2026-05-25T07:54:13.299541+00:00,INFO,general,Modo desactivado por trigger OFF: horario_carga_cajero,system,system,,1
+32634,2026-05-25T07:54:06.284545+00:00,OK,general,Regla ejecutada: horario_carga_cajero,system,system,,1
+32633,2026-05-25T07:54:04.612509+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32632,2026-05-25T07:53:58.364852+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32631,2026-05-25T07:53:48.198077+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_oficina,system,system,,1
+32630,2026-05-25T07:53:44.915654+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32629,2026-05-25T07:53:37.438529+00:00,INFO,general,Modo desactivado por trigger OFF: horario_extendido,system,system,,1
+32628,2026-05-25T07:53:28.484840+00:00,OK,general,Regla ejecutada: horario_extendido,system,system,,1
+32627,2026-05-25T07:53:06.481652+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32626,2026-05-25T07:53:06.401605+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32625,2026-05-25T07:53:00.476370+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32624,2026-05-25T07:53:00.396444+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32623,2026-05-25T07:52:57.267183+00:00,INFO,general,Modo desactivado por trigger OFF: horario_extendido,system,system,,1
+32622,2026-05-25T07:52:54.239859+00:00,OK,general,Regla ejecutada: horario_extendido,system,system,,1
+32621,2026-05-25T07:52:23.363053+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32620,2026-05-25T07:52:23.282867+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32619,2026-05-25T07:52:20.280175+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32618,2026-05-25T07:52:20.199971+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32617,2026-05-25T07:52:14.394826+00:00,INFO,general,Modo desactivado por trigger OFF: cierres_mecanicos_puerta_oficina,system,system,,1
+32616,2026-05-25T07:52:05.227905+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_oficina,system,system,,1
+32615,2026-05-25T07:51:47.239408+00:00,OK,general,Regla ejecutada: horario_autoservicio,system,system,,1
+32614,2026-05-25T07:51:42.681582+00:00,INFO,general,Modo desactivado por trigger OFF: horario_autoservicio,system,system,,1
+32613,2026-05-25T07:50:45.346851+00:00,OK,general,Regla ejecutada: horario_autoservicio,system,system,,1
+32612,2026-05-25T07:50:40.826233+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32611,2026-05-25T07:50:20.035064+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32610,2026-05-25T07:50:17.000774+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32609,2026-05-25T07:50:13.966209+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32608,2026-05-25T07:50:07.976843+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32607,2026-05-25T07:49:55.712913+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32606,2026-05-25T07:49:42.586340+00:00,OK,general,Regla ejecutada: cierres_mecanicos_puerta_calle,system,system,,1
+32605,2026-05-25T07:49:27.430118+00:00,OK,general,Regla ejecutada: horario_extendido,system,system,,1
+32604,2026-05-25T07:46:46.091496+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina_esclusa,system,system,,1
+32603,2026-05-25T07:46:46.011990+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina,system,system,,1
+32602,2026-05-25T07:46:39.964412+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina_esclusa,system,system,,1
+32601,2026-05-25T07:46:39.884357+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina,system,system,,1
+32600,2026-05-25T07:46:30.835622+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina_esclusa,system,system,,1
+32599,2026-05-25T07:46:30.755507+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina,system,system,,1
+32598,2026-05-25T07:46:27.712561+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina_esclusa,system,system,,1
+32597,2026-05-25T07:46:27.632444+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina,system,system,,1
+32596,2026-05-25T07:46:21.728612+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32595,2026-05-25T07:46:21.608755+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32594,2026-05-25T07:46:15.659812+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32593,2026-05-25T07:46:15.539985+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32592,2026-05-25T07:46:06.676594+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32591,2026-05-25T07:46:06.596835+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32590,2026-05-25T07:46:03.602258+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32589,2026-05-25T07:46:00.527761+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32588,2026-05-25T07:46:00.447868+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32587,2026-05-25T07:45:57.444964+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina_esclusa,system,system,,1
+32586,2026-05-25T07:45:57.333710+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_calle,system,system,,1
+32585,2026-05-25T07:45:54.379362+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_calle,system,system,,1
+32584,2026-05-25T07:45:42.593301+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina_esclusa,system,system,,1
+32583,2026-05-25T07:45:39.590992+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32582,2026-05-25T07:45:36.613955+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle_esclusa,system,system,,1
+32581,2026-05-25T07:45:36.534180+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32580,2026-05-25T07:45:36.468741+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32579,2026-05-25T07:45:33.346798+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32578,2026-05-25T07:45:30.307241+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle_esclusa,system,system,,1
+32577,2026-05-25T07:45:30.187378+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32576,2026-05-25T07:45:21.334743+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_exterior,system,system,,1
+32575,2026-05-25T07:45:18.332293+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_exterior,system,system,,1
+32574,2026-05-25T07:44:57.270676+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina_esclusa,system,system,,1
+32573,2026-05-25T07:44:57.190428+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina,system,system,,1
+32572,2026-05-25T07:44:54.187283+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina_esclusa,system,system,,1
+32571,2026-05-25T07:44:54.107097+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina,system,system,,1
+32570,2026-05-25T07:44:30.239650+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_exterior,system,system,,1
+32569,2026-05-25T07:44:27.195807+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_exterior,system,system,,1
+32568,2026-05-25T07:44:21.167069+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32567,2026-05-25T07:44:18.173603+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32566,2026-05-25T07:44:12.106932+00:00,INFO,general,Modo desactivado por trigger OFF: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32565,2026-05-25T07:44:09.033670+00:00,OK,general,Regla ejecutada: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32564,2026-05-25T07:44:02.208081+00:00,INFO,general,Modo desactivado por trigger OFF: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32563,2026-05-25T07:43:59.133643+00:00,OK,general,Regla ejecutada: pulsador_emergencia_verde_puerta_calle,system,system,,1
+32562,2026-05-25T07:43:53.042696+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32561,2026-05-25T07:43:50.039896+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32560,2026-05-25T07:43:46.798858+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_calle,system,system,,1
+32559,2026-05-25T07:43:43.765372+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_calle,system,system,,1
+32558,2026-05-25T07:43:37.736588+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32557,2026-05-25T07:43:34.663472+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32556,2026-05-25T07:43:28.665050+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_oficina,system,system,,1
+32555,2026-05-25T07:43:25.542432+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_oficina,system,system,,1
+32554,2026-05-25T07:43:07.690037+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_interior_puerta_oficina,system,system,,1
+32553,2026-05-25T07:43:04.647019+00:00,OK,general,Radar ON â†’ salidas regla radares_interior_puerta_oficina,system,system,,1
+32552,2026-05-25T07:42:52.704807+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32551,2026-05-25T07:42:45.195031+00:00,INFO,general,Modo desactivado por trigger OFF: horario_esclusa,system,system,,1
+32550,2026-05-25T07:42:42.002039+00:00,OK,general,Regla ejecutada: horario_esclusa,system,system,,1
+32549,2026-05-25T07:42:22.662186+00:00,INFO,general,Modo desactivado por trigger OFF: horario_esclusa,system,system,,1
+32548,2026-05-25T07:42:19.488466+00:00,OK,general,Regla ejecutada: horario_esclusa,system,system,,1
+32547,2026-05-25T07:41:07.078914+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32546,2026-05-25T07:41:01.130630+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32545,2026-05-25T07:40:58.176033+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32544,2026-05-25T07:40:55.180961+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32543,2026-05-25T07:40:33.982124+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32542,2026-05-25T07:40:30.979699+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32541,2026-05-25T07:38:21.351075+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF radares_exterior_puerta_calle,system,system,,1
+32540,2026-05-25T07:38:18.351215+00:00,OK,general,Radar ON â†’ salidas regla radares_exterior_puerta_calle,system,system,,1
+32539,2026-05-24T11:10:40.677239+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32538,2026-05-24T11:10:40.664441+00:00,INFO,general,Pulso finalizado: override liberado en IN_03_07 (interfono_puerta_oficina_interior),system,system,,1
+32537,2026-05-24T11:10:37.606545+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32536,2026-05-24T11:10:35.951379+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,3
+32535,2026-05-24T11:09:20.179662+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32534,2026-05-24T11:09:20.167184+00:00,INFO,general,Pulso finalizado: override liberado en IN_03_07 (interfono_puerta_oficina_interior),system,system,,1
+32533,2026-05-24T11:09:17.318247+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32532,2026-05-24T11:09:17.068899+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32531,2026-05-24T11:09:16.130016+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,3
+32530,2026-05-24T11:09:15.334915+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32529,2026-05-24T11:09:04.962396+00:00,INFO,general,Pulso finalizado: interfono_puerta_oficina_interior,system,system,,1
+32528,2026-05-24T11:09:04.948897+00:00,INFO,general,Pulso finalizado: override liberado en IN_03_07 (interfono_puerta_oficina_interior),system,system,,1
+32527,2026-05-24T11:09:01.848901+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_oficina_interior,system,system,,1
+32526,2026-05-24T11:09:01.204797+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32525,2026-05-24T11:09:00.062430+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,3
+32524,2026-05-24T11:08:59.277373+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32523,2026-05-24T11:08:48.721262+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32522,2026-05-24T11:08:46.883508+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32521,2026-05-24T11:08:44.758183+00:00,INFO,auth_login,Login API tablet: ceroideas,auth,tablet,ceroideas,0
+32520,2026-05-24T10:17:13.932014+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32519,2026-05-24T10:17:13.919584+00:00,INFO,general,Pulso finalizado: override liberado en IN_02_07 (interfono_puerta_calle_interior),system,system,,1
+32518,2026-05-24T10:17:10.787374+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32517,2026-05-24T10:17:10.631167+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,2
+32516,2026-05-23T22:07:22.776937+00:00,INFO,general,Pulso finalizado: interfono_puerta_calle_interior,system,system,,1
+32515,2026-05-23T22:07:22.764899+00:00,INFO,general,Pulso finalizado: override liberado en IN_02_07 (interfono_puerta_calle_interior),system,system,,1
+32514,2026-05-23T22:07:19.716495+00:00,OK,general,Pulso 2s iniciado: interfono_puerta_calle_interior,system,system,,1
+32513,2026-05-23T22:07:18.605197+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,2
+32512,2026-05-23T22:06:56.501496+00:00,INFO,general,Override IN07 limpiado,panel_ui,panel,ceroideas,2
+32511,2026-05-23T22:06:47.097479+00:00,INFO,general,Reglas actualizadas por JSON,panel_ui,panel,ceroideas,1
+32510,2026-05-23T22:05:03.313490+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF interfono_puerta_calle_interior,system,system,,1
+32509,2026-05-23T22:05:02.120945+00:00,INFO,general,Override IN07 = False,panel_ui,panel,ceroideas,2
+32508,2026-05-23T22:04:45.622694+00:00,OK,general,Radar ON â†’ salidas regla interfono_puerta_calle_interior,system,system,,1
+32507,2026-05-23T22:04:44.487087+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,2
+32506,2026-05-23T22:04:33.405914+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32505,2026-05-23T22:04:32.251096+00:00,INFO,general,Override IN07 limpiado,panel_ui,panel,ceroideas,2
+32504,2026-05-23T22:04:31.424532+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32503,2026-05-23T22:04:24.621482+00:00,INFO,general,Radar OFF o bloqueo â†’ salidas OFF interfono_puerta_calle_interior,system,system,,1
+32502,2026-05-23T22:04:24.620122+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32501,2026-05-23T22:04:23.412236+00:00,INFO,general,Override IN07 = False,panel_ui,panel,ceroideas,2
+32500,2026-05-23T22:04:22.580616+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32499,2026-05-23T22:03:40.061706+00:00,OK,general,Radar ON â†’ salidas regla interfono_puerta_calle_interior,system,system,,1
+32498,2026-05-23T22:03:38.489234+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32497,2026-05-23T22:03:37.065750+00:00,INFO,general,Override IN07 = True,panel_ui,panel,ceroideas,2
+32496,2026-05-23T22:03:36.259678+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32495,2026-05-23T22:03:29.588296+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32494,2026-05-23T22:03:27.660216+00:00,INFO,auth_login,Login panel: ceroideas,auth,panel,ceroideas,0
+32493,2026-05-23T22:03:25.622362+00:00,INFO,auth_login,Login API tablet: ceroideas,auth,tablet,ceroideas,0
+32492,2026-05-23T22:02:08.225054+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32491,2026-05-23T22:02:07.704974+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",system,system,,1
+32490,2026-05-23T22:02:07.620202+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32489,2026-05-23T22:02:06.655386+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=3",system,system,,3
+32488,2026-05-23T22:02:06.561766+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32487,2026-05-23T22:02:06.439046+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",system,system,,2
+32486,2026-05-23T22:02:06.322356+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32485,2026-05-23T21:56:38.927182+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32484,2026-05-23T21:56:38.407149+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",system,system,,1
+32483,2026-05-23T21:56:38.288553+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32482,2026-05-23T21:56:37.323664+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=3",system,system,,3
+32481,2026-05-23T21:56:37.237495+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32480,2026-05-23T21:56:37.114564+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",system,system,,2
+32479,2026-05-23T21:56:37.018252+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32478,2026-05-23T15:44:45.031671+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",system,system,,1
+32477,2026-05-23T15:44:44.638483+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32476,2026-05-23T15:44:37.609351+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=3",system,system,,3
+32475,2026-05-23T15:44:37.217396+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32474,2026-05-23T15:44:32.173514+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",system,system,,2
+32473,2026-05-23T15:44:31.755941+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32472,2026-05-23T15:44:24.761346+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32471,2026-05-23T15:44:22.356998+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",system,system,,1
+32470,2026-05-23T15:44:21.947825+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32469,2026-05-23T15:44:17.180872+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=3",system,system,,3
+32468,2026-05-23T15:44:16.790091+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32467,2026-05-23T15:44:16.045893+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",system,system,,2
+32466,2026-05-23T15:44:15.629945+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32465,2026-05-21T17:10:08.233183+00:00,ERR,general,"TCP Modbus no operativo (slave_id=4): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,2
+32464,2026-05-21T17:10:04.211007+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32463,2026-05-21T17:09:59.899733+00:00,ERR,general,"TCP Modbus no operativo (slave_id=1): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,1
+32462,2026-05-21T17:09:55.880986+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32461,2026-05-21T17:09:49.564119+00:00,ERR,general,"TCP Modbus no operativo (slave_id=3): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,3
+32460,2026-05-21T17:09:45.544368+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32459,2026-05-21T17:09:19.239621+00:00,OK,general,Regla ejecutada: horario_automatico,system,system,,1
+32458,2026-05-21T17:09:05.127572+00:00,OK,general,Regla forzada ejecutada: horario_automatico,panel_ui,panel,ceroideas,1
+32457,2026-05-21T17:09:04.800095+00:00,OK,general,Radar ON â†’ salidas regla interfono_puerta_calle_interior,system,system,,1
+32456,2026-05-21T17:09:04.032136+00:00,OK,general,Regla ejecutada: horario_cerrado,system,system,,1
+32455,2026-05-21T17:08:49.189418+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",panel_ui,panel,ceroideas,2
+32454,2026-05-21T17:08:48.472433+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),panel_ui,panel,ceroideas,2
+32453,2026-05-21T17:08:48.047983+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=3",system,system,,3
+32452,2026-05-21T17:08:47.583064+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32451,2026-05-21T17:08:47.576098+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",panel_ui,panel,ceroideas,1
+32450,2026-05-21T17:08:46.419411+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),panel_ui,panel,ceroideas,1
+32449,2026-05-21T13:38:35.507323+00:00,INFO,general,Modo desactivado por trigger OFF: horario_automatico,system,system,,1
+32448,2026-05-21T13:38:35.504333+00:00,WARN,general,desactiva_flanco:horario_automatico: omitida salida OUT_03_06 (mÃ³dulo 3 sin Modbus conectado),system,system,,3
+32447,2026-05-21T13:38:35.500346+00:00,WARN,general,desactiva_flanco:horario_automatico: omitida salida OUT_03_05 (mÃ³dulo 3 sin Modbus conectado),system,system,,3
+32446,2026-05-21T13:38:35.491712+00:00,ERR,general,TCP 192.168.1.103:5000: No se pudo establecer conexiÃ³n TCP,system,system,,3
+32445,2026-05-21T13:38:31.471923+00:00,WARN,general,desactiva_flanco:horario_automatico: omitida salida OUT_02_05 (mÃ³dulo 2 sin Modbus conectado),system,system,,2
+32444,2026-05-21T13:38:31.468000+00:00,WARN,general,desactiva_flanco:horario_automatico: omitida salida OUT_02_06 (mÃ³dulo 2 sin Modbus conectado),system,system,,2
+32443,2026-05-21T13:38:31.464577+00:00,ERR,general,TCP 192.168.1.102:5000: No se pudo establecer conexiÃ³n TCP,system,system,,2
+32442,2026-05-21T10:16:28.692123+00:00,ERR,general,"TCP Modbus no operativo (slave_id=4): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,2
+32441,2026-05-21T10:16:24.679973+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),system,system,,2
+32440,2026-05-21T10:16:20.476325+00:00,ERR,general,"TCP Modbus no operativo (slave_id=1): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,1
+32439,2026-05-21T10:16:16.463485+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),system,system,,1
+32438,2026-05-21T10:16:10.035879+00:00,ERR,general,"TCP Modbus no operativo (slave_id=3): Modbus Error: [Input/Output] No response received after 0 retries, continue with next request",system,system,,3
+32437,2026-05-21T10:16:06.016585+00:00,OK,general,TCP conectado a 192.168.1.103:5000 (slave_id=3),system,system,,3
+32436,2026-05-21T10:12:58.019861+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=4",panel_ui,panel,ceroideas,2
+32435,2026-05-21T10:12:56.821146+00:00,OK,general,TCP conectado a 192.168.1.102:5000 (slave_id=4),panel_ui,panel,ceroideas,2
+32434,2026-05-21T10:12:54.391226+00:00,OK,general,"Desacople IN/OUT aplicado: holding 0x00FA (250)=0, slave_id=1",panel_ui,panel,ceroideas,1
+32433,2026-05-21T10:12:53.934510+00:00,OK,general,TCP conectado a 192.168.1.101:5000 (slave_id=1),panel_ui,panel,ceroideas,1

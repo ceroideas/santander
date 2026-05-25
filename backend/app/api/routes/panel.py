@@ -109,9 +109,22 @@ def _coce_notify(event_type: str, payload: dict | None = None) -> None:
         _publish_panel_status_debounced()
 
 
-def _rule_owns_operational_mode(rule: dict) -> bool:
-    """Solo `enclavamiento` define el modo operativo global (`current_mode`). Pulso, manual, etc. no lo sustituyen."""
-    return (rule.get("type") or "enclavamiento") == "enclavamiento"
+# Modos operativos de consola central (IN1–IN7) + emergencia/incendio (actuación 8, IN9 central).
+HORARIO_MODE_KEY_PREFIX = "horario_"
+EMERGENCY_MODE_RULE_KEYS = frozenset({"senal_de_incendio_activada"})
+
+
+def _rule_owns_operational_mode(rule: dict, rule_key: str) -> bool:
+    """Solo horarios (IN1–IN7) e incendio/emergencia global actualizan `current_mode`."""
+    if (rule.get("type") or "enclavamiento") != "enclavamiento":
+        return False
+    if rule_key.startswith(HORARIO_MODE_KEY_PREFIX):
+        return True
+    return rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _rule_is_emergency_operational(rule_key: str) -> bool:
+    return rule_key in EMERGENCY_MODE_RULE_KEYS
 
 
 def _pymodbus_client_kwargs() -> Dict[str, Any]:
@@ -258,6 +271,7 @@ mode_latches: Dict[str, bool] = {}
 # IN trigger de reglas enclavamiento → clave de modo (p. ej. IN_01_05 → horario_cerrado).
 in_trigger_to_mode: Dict[str, str] = {}
 current_mode: Optional[str] = None
+previous_operational_mode: Optional[str] = None
 DEFAULT_RULES_CONFIG: Dict[str, dict] = {}
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 RULES_FILE = BACKEND_DIR / "data" / "panel_rules.json"
@@ -334,6 +348,7 @@ _sync_rules_runtime(rules_config)
 
 PANEL_STATE_OVERRIDES_KEY = "panel_input_overrides"
 PANEL_STATE_CURRENT_MODE_KEY = "panel_current_mode"
+PANEL_STATE_PREVIOUS_MODE_KEY = "panel_previous_operational_mode"
 
 
 def _ensure_panel_state_table() -> None:
@@ -382,8 +397,54 @@ def _persist_current_mode_to_db() -> None:
     _save_panel_state_value(PANEL_STATE_CURRENT_MODE_KEY, json.dumps({"current_mode": current_mode}))
 
 
+def _persist_previous_operational_mode_to_db() -> None:
+    _save_panel_state_value(
+        PANEL_STATE_PREVIOUS_MODE_KEY,
+        json.dumps({"previous_operational_mode": previous_operational_mode}),
+    )
+
+
+def _stash_operational_mode_before_emergency() -> None:
+    """Guarda el horario vigente antes de activar incendio/emergencia (como la tablet)."""
+    global previous_operational_mode
+    if (
+        current_mode
+        and current_mode.startswith(HORARIO_MODE_KEY_PREFIX)
+        and not _rule_is_emergency_operational(current_mode)
+    ):
+        previous_operational_mode = current_mode
+        _persist_previous_operational_mode_to_db()
+
+
+def _restore_operational_mode_after_emergency() -> None:
+    """Al soltar emergencia/incendio, restaura el horario anterior si su IN sigue activo."""
+    global current_mode, previous_operational_mode
+    prev = previous_operational_mode
+    previous_operational_mode = None
+    _persist_previous_operational_mode_to_db()
+    restored: Optional[str] = None
+    if prev:
+        rule = rules_config.get(prev) or {}
+        trigger = rule.get("trigger")
+        if isinstance(trigger, str) and trigger:
+            try:
+                still_on = _read_input_effective(
+                    trigger,
+                    use_hardware_if_no_override=True,
+                    use_overrides=True,
+                    physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
+                )
+            except Exception:  # noqa: BLE001
+                still_on = False
+            if still_on:
+                restored = prev
+    current_mode = restored
+    _persist_current_mode_to_db()
+    _coce_notify("mode_changed", {"current_mode": current_mode})
+
+
 def _load_persisted_panel_state() -> None:
-    global current_mode
+    global current_mode, previous_operational_mode
     _sync_runtime_from_db()
     raw_overrides = _load_panel_state_value(PANEL_STATE_OVERRIDES_KEY)
     if raw_overrides:
@@ -408,6 +469,16 @@ def _load_persisted_panel_state() -> None:
             mode_value = mode_obj.get("current_mode")
             if isinstance(mode_value, str) or mode_value is None:
                 current_mode = mode_value
+        except Exception:  # noqa: BLE001
+            pass
+
+    raw_prev = _load_panel_state_value(PANEL_STATE_PREVIOUS_MODE_KEY)
+    if raw_prev:
+        try:
+            prev_obj = json.loads(raw_prev)
+            prev_value = prev_obj.get("previous_operational_mode")
+            if isinstance(prev_value, str) or prev_value is None:
+                previous_operational_mode = prev_value
         except Exception:  # noqa: BLE001
             pass
 
@@ -891,9 +962,13 @@ def _blocked_signal_active(
         return bool(outs[channel - 1])
     mode_key = in_trigger_to_mode.get(code)
     if mode_key is not None:
-        # IN de modo enclavamiento: solo bloquea si ese modo es el operativo vigente
-        # (última activación), no por cable suelto con otro modo en current_mode.
-        return current_mode == mode_key
+        # IN de horario/emergencia en "No actúa si está activo": cable físico (o override ON).
+        return _read_input_effective(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=physical_inputs,
+        )
     return _read_input_effective(
         code,
         use_hardware_if_no_override=use_hardware_if_no_override,
@@ -1511,7 +1586,9 @@ def _evaluate_trigger_rule(
     _apply_enclavamiento_mode_activation(
         rule, trigger_code, activated_by_panel_override=by_panel
     )
-    if _rule_owns_operational_mode(rule):
+    if _rule_owns_operational_mode(rule, rule_key):
+        if _rule_is_emergency_operational(rule_key):
+            _stash_operational_mode_before_emergency()
         current_mode = rule_key
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
@@ -1623,9 +1700,13 @@ def _deactivate_rule_on_fall(
         return False
 
     mode_latches[trigger_code] = False
-    current_mode = None
-    _persist_current_mode_to_db()
-    _coce_notify("mode_changed", {"current_mode": None})
+
+    if _rule_is_emergency_operational(rule_key):
+        _restore_operational_mode_after_emergency()
+    else:
+        current_mode = None
+        _persist_current_mode_to_db()
+        _coce_notify("mode_changed", {"current_mode": None})
 
     _restore_temp_deactivate_outputs(
         rule, rule_key, apply_outputs_to_hardware, origin=f"desactiva_flanco:{rule_key}"
@@ -1834,7 +1915,9 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         rule, apply_outputs_to_hardware, rule_key=rule_key, origin=f"forzado:{rule_key}"
     )
 
-    if _rule_owns_operational_mode(rule):
+    if _rule_owns_operational_mode(rule, rule_key):
+        if _rule_is_emergency_operational(rule_key):
+            _stash_operational_mode_before_emergency()
         current_mode = rule_key
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
