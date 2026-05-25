@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import {
-  clearPanelToken,
-  getPanelToken,
-  getPanelWsLiveUrl,
-} from "./panelAuth";
+import { clearPanelToken, getPanelToken, getPanelWsLiveUrl } from "./panelAuth";
 import { TopNavbar } from "./components/TopNavbar";
 import { GlobalLoader } from "./components/GlobalLoader";
+import { ruleBlockersActive } from "./utils/panelRuleBlockers";
 import {
   faBolt,
   faBookOpen,
@@ -242,7 +239,9 @@ async function apiFetch(path, opts = {}) {
     return res.json();
   } catch (e) {
     if (e?.name === "AbortError") {
-      throw new Error("Tiempo de espera agotado (el servidor o Modbus tardaron demasiado)");
+      throw new Error(
+        "Tiempo de espera agotado (el servidor o Modbus tardaron demasiado)",
+      );
     }
     throw e;
   } finally {
@@ -489,7 +488,10 @@ function RulesFormAssistant({
 
   const mergeToJson = () => {
     if (!wfName.trim()) {
-      addUI("ERR", "Indica un nombre para el modo (se usará para la clave JSON).");
+      addUI(
+        "ERR",
+        "Indica un nombre para el modo (se usará para la clave JSON).",
+      );
       return;
     }
     if (ins.length && !wfTrigger) {
@@ -512,7 +514,9 @@ function RulesFormAssistant({
     }
     if (wfType === "pulso_5_sg") {
       const n = parseInt(String(wfPulseSeconds).trim(), 10);
-      rule.pulse_seconds = Number.isFinite(n) ? Math.min(300, Math.max(0, n)) : 0;
+      rule.pulse_seconds = Number.isFinite(n)
+        ? Math.min(300, Math.max(0, n))
+        : 0;
     }
     let parsed = {};
     try {
@@ -639,7 +643,8 @@ function RulesFormAssistant({
         </code>
         ). Los códigos siguen el mapa de tus placas (
         <span style={{ fontFamily: "monospace", fontSize: 11 }}>IN_YY_ZZ</span>{" "}
-        / <span style={{ fontFamily: "monospace", fontSize: 11 }}>OUT_YY_ZZ</span>
+        /{" "}
+        <span style={{ fontFamily: "monospace", fontSize: 11 }}>OUT_YY_ZZ</span>
         ).
       </div>
       {ruleKeys.length > 0 && (
@@ -808,7 +813,9 @@ function RulesFormAssistant({
           >
             <option value="enclavamiento">enclavamiento</option>
             <option value="manual">manual</option>
-            <option value="pulso_5_sg">radar / pulso (0=detectar, N s=pulso)</option>
+            <option value="pulso_5_sg">
+              radar / pulso (0=detectar, N s=pulso)
+            </option>
           </select>
         </div>
       </div>
@@ -816,11 +823,20 @@ function RulesFormAssistant({
       {wfType === "pulso_5_sg" && (
         <div style={{ ...assistSection, marginTop: -6, marginBottom: 8 }}>
           <div style={{ fontSize: 11, color: C.textSub, marginBottom: 6 }}>
-            <code>pulse_seconds</code>: <strong>0</strong> = salida sigue al IN mientras detecte (y
-            bloqueos); <strong>1–300</strong> = pulso en segundos tras flanco de subida (sin clave en
-            JSON el backend usa 0 = detección).
+            <code>pulse_seconds</code>: <strong>0</strong> = salida sigue al IN
+            mientras detecte (y bloqueos); <strong>1–300</strong> = pulso en
+            segundos tras flanco de subida (sin clave en JSON el backend usa 0 =
+            detección).
           </div>
-          <label style={{ fontSize: 12, color: C.textMid, display: "flex", alignItems: "center", gap: 8 }}>
+          <label
+            style={{
+              fontSize: 12,
+              color: C.textMid,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
             Segundos (0 = detectar)
             <input
               type="number"
@@ -846,8 +862,18 @@ function RulesFormAssistant({
             borderLeft: `3px solid ${C.red}`,
           }}
         >
-          <FontAwesomeIcon icon={faLock} style={{ color: C.red, fontSize: 14 }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+          <FontAwesomeIcon
+            icon={faLock}
+            style={{ color: C.red, fontSize: 14 }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: C.textMid,
+              lineHeight: 1.35,
+            }}
+          >
             Bloqueos (si estas IN están activas, no se ejecuta)
           </span>
         </div>
@@ -892,15 +918,27 @@ function RulesFormAssistant({
             borderLeft: `3px solid ${C.red}`,
           }}
         >
-          <FontAwesomeIcon icon={faPowerOff} style={{ color: C.red, fontSize: 14 }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+          <FontAwesomeIcon
+            icon={faPowerOff}
+            style={{ color: C.red, fontSize: 14 }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: C.textMid,
+              lineHeight: 1.35,
+            }}
+          >
             Desactivar modos (IN → override OFF al ejecutar)
           </span>
         </div>
         <div style={{ marginBottom: 10, minHeight: 28 }}>
           <ChipList
             items={wfDeactivate}
-            onRemove={(c) => setWfDeactivate(wfDeactivate.filter((x) => x !== c))}
+            onRemove={(c) =>
+              setWfDeactivate(wfDeactivate.filter((x) => x !== c))
+            }
             C={C}
             labelByCode={ioLabelByCode}
           />
@@ -936,8 +974,18 @@ function RulesFormAssistant({
             borderLeft: `3px solid ${C.red}`,
           }}
         >
-          <FontAwesomeIcon icon={faToggleOn} style={{ color: C.green, fontSize: 14 }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+          <FontAwesomeIcon
+            icon={faToggleOn}
+            style={{ color: C.green, fontSize: 14 }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: C.textMid,
+              lineHeight: 1.35,
+            }}
+          >
             Activar salidas (OUT → ON)
           </span>
         </div>
@@ -980,8 +1028,18 @@ function RulesFormAssistant({
             borderLeft: `3px solid ${C.red}`,
           }}
         >
-          <FontAwesomeIcon icon={faToggleOff} style={{ color: C.textSub, fontSize: 14 }} />
-          <span style={{ fontSize: 12, fontWeight: 700, color: C.textMid, lineHeight: 1.35 }}>
+          <FontAwesomeIcon
+            icon={faToggleOff}
+            style={{ color: C.textSub, fontSize: 14 }}
+          />
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: C.textMid,
+              lineHeight: 1.35,
+            }}
+          >
             Desactivar salidas (OUT → OFF)
           </span>
           <label
@@ -1034,7 +1092,14 @@ function RulesFormAssistant({
         </select>
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 10,
+        }}
+      >
         <Btn variant="primary" onClick={mergeToJson} disabled={!ins.length}>
           <span
             style={{
@@ -1057,7 +1122,15 @@ function RulesFormAssistant({
   );
 }
 
-function ModuleChannelRow({ mod, channel, index, onDelete, onRefresh, addUI, showCmdCols }) {
+function ModuleChannelRow({
+  mod,
+  channel,
+  index,
+  onDelete,
+  onRefresh,
+  addUI,
+  showCmdCols,
+}) {
   const [channelName, setChannelName] = useState(channel.channel_name ?? "");
 
   useEffect(() => {
@@ -1081,7 +1154,9 @@ function ModuleChannelRow({ mod, channel, index, onDelete, onRefresh, addUI, sho
   return (
     <tr style={{ borderBottom: `1px solid ${C.border}` }}>
       <td style={{ padding: 4, whiteSpace: "nowrap" }}>#{index + 1}</td>
-      <td style={{ padding: 4, fontFamily: "monospace" }}>{fmtHex(channel.address)}</td>
+      <td style={{ padding: 4, fontFamily: "monospace" }}>
+        {fmtHex(channel.address)}
+      </td>
       {showCmdCols ? (
         <td style={{ padding: 4, fontFamily: "monospace", color: C.muted }}>
           {channel.open_cmd != null ? fmtHex(channel.open_cmd) : "def"} /{" "}
@@ -1256,7 +1331,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
   const delMod = async () => {
     if (
       !window.confirm(
-      `¿Eliminar placa «${mod.name}» (id ${mod.id}) y todos sus canales?`,
+        `¿Eliminar placa «${mod.name}» (id ${mod.id}) y todos sus canales?`,
       )
     )
       return;
@@ -1627,6 +1702,9 @@ export default function ETD8A12Panel() {
   const [rulesJson, setRulesJson] = useState("");
   const [rulesMap, setRulesMap] = useState({});
   const [selectedMode, setSelectedMode] = useState(null);
+  const [pendingManualEnclavamientoMode, setPendingManualEnclavamientoMode] =
+    useState(null);
+  const [activatingQueuedMode, setActivatingQueuedMode] = useState(null);
   const [activeToggleRules, setActiveToggleRules] = useState([]);
   const [globalLoadingCount, setGlobalLoadingCount] = useState(0);
   const [initialStatusLoaded, setInitialStatusLoaded] = useState(false);
@@ -1679,6 +1757,8 @@ export default function ETD8A12Panel() {
   const panelWsRef = useRef(null);
   const rulesMapRef = useRef(rulesMap);
   rulesMapRef.current = rulesMap;
+  const boardsRef = useRef(boards);
+  boardsRef.current = boards;
 
   const orderedModuleIds = useMemo(() => {
     if (moduleList.length) {
@@ -1743,32 +1823,38 @@ export default function ETD8A12Panel() {
     [beginGlobalLoading, endGlobalLoading],
   );
 
-  const scrollContainerToBottom = useCallback((containerRef, { smooth = true } = {}) => {
-    const box = containerRef.current;
-    if (!box) return;
-    const run = () => {
-      box.scrollTo({
-        top: box.scrollHeight,
-        behavior: smooth ? "smooth" : "auto",
+  const scrollContainerToBottom = useCallback(
+    (containerRef, { smooth = true } = {}) => {
+      const box = containerRef.current;
+      if (!box) return;
+      const run = () => {
+        box.scrollTo({
+          top: box.scrollHeight,
+          behavior: smooth ? "smooth" : "auto",
+        });
+      };
+      requestAnimationFrame(() => {
+        run();
+        requestAnimationFrame(run);
       });
-    };
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
-    });
-  }, []);
+    },
+    [],
+  );
 
-  const scrollContainerToTop = useCallback((containerRef, { smooth = true } = {}) => {
-    const box = containerRef.current;
-    if (!box) return;
-    const run = () => {
-      box.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
-    };
-    requestAnimationFrame(() => {
-      run();
-      requestAnimationFrame(run);
-    });
-  }, []);
+  const scrollContainerToTop = useCallback(
+    (containerRef, { smooth = true } = {}) => {
+      const box = containerRef.current;
+      if (!box) return;
+      const run = () => {
+        box.scrollTo({ top: 0, behavior: smooth ? "smooth" : "auto" });
+      };
+      requestAnimationFrame(() => {
+        run();
+        requestAnimationFrame(run);
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     const mergeStatusPayload = (d) => {
@@ -1814,6 +1900,11 @@ export default function ETD8A12Panel() {
       if (Array.isArray(d.active_toggle_rules)) {
         setActiveToggleRules(d.active_toggle_rules);
       }
+      if ("pending_manual_enclavamiento_mode" in d) {
+        setPendingManualEnclavamientoMode(
+          d.pending_manual_enclavamiento_mode || null,
+        );
+      }
     };
     mergeStatusRef.current = mergeStatusPayload;
 
@@ -1829,8 +1920,7 @@ export default function ETD8A12Panel() {
           mergeStatusPayload(d0);
           setServer(true);
         } else {
-          const refreshHw =
-            typeof document !== "undefined" && !document.hidden;
+          const refreshHw = typeof document !== "undefined" && !document.hidden;
           const statusPath = refreshHw
             ? "/status"
             : "/status?refresh_hardware=false";
@@ -1916,6 +2006,68 @@ export default function ETD8A12Panel() {
     };
   }, []);
 
+  // Cola
+  useEffect(() => {
+    const pending = pendingManualEnclavamientoMode;
+    if (!pending) {
+      setActivatingQueuedMode(null);
+      return;
+    }
+
+    let cancelled = false;
+    const wait = (ms) =>
+      new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+      });
+
+    const watchQueue = async () => {
+      while (!cancelled) {
+        const stillBlocked = ruleBlockersActive(
+          pending,
+          rulesMapRef.current,
+          boardsRef.current,
+        );
+        if (stillBlocked) {
+          setActivatingQueuedMode(null);
+          try {
+            const d = await apiFetch("/status", { timeoutMs: 120000 });
+            if (!cancelled) {
+              mergeStatusRef.current?.(d);
+              setServer(true);
+            }
+          } catch {
+            if (!cancelled) setServer(false);
+          }
+          await wait(2000);
+          continue;
+        }
+        setActivatingQueuedMode(pending);
+        beginGlobalLoading();
+        try {
+          const d = await apiFetch("/status", { timeoutMs: 120000 });
+          if (cancelled) break;
+          mergeStatusRef.current?.(d);
+          setServer(true);
+          if (!d.pending_manual_enclavamiento_mode) break;
+        } catch {
+          if (!cancelled) setServer(false);
+        } finally {
+          endGlobalLoading();
+          setActivatingQueuedMode(null);
+        }
+        await wait(2000);
+      }
+    };
+
+    void watchQueue();
+
+    return () => {
+      cancelled = true;
+      endGlobalLoading();
+      setActivatingQueuedMode(null);
+    };
+  }, [pendingManualEnclavamientoMode, beginGlobalLoading, endGlobalLoading]);
+
   const afterPanelMutation = useCallback(async () => {
     if (!mergeStatusRef.current) return;
     try {
@@ -1938,7 +2090,9 @@ export default function ETD8A12Panel() {
           if (parsedLocal && typeof parsedLocal === "object") {
             setRulesMap(parsedLocal);
             setRulesJson(JSON.stringify(parsedLocal, null, 2));
-            setSelectedMode((prev) => (prev && parsedLocal[prev] ? prev : null));
+            setSelectedMode((prev) =>
+              prev && parsedLocal[prev] ? prev : null,
+            );
           }
         }
 
@@ -2149,7 +2303,7 @@ export default function ETD8A12Panel() {
       }
     });
   };
-  
+
   const doConfig = async (id) => {
     await withGlobalLoader(async () => {
       try {
@@ -2189,8 +2343,9 @@ export default function ETD8A12Panel() {
           method: "POST",
           body: JSON.stringify({ board_id: boardId, channel, state: next }),
         });
-        const blocked = Array.isArray(res?.auto_rules?.blocked_rules)
-          && res.auto_rules.blocked_rules.length > 0;
+        const blocked =
+          Array.isArray(res?.auto_rules?.blocked_rules) &&
+          res.auto_rules.blocked_rules.length > 0;
         if (res?.denied || blocked) {
           const detail = (res?.blocked_rules || [])
             .map((b) => `${b.rule_key}: ${(b.blocked_inputs || []).join(", ")}`)
@@ -2236,13 +2391,31 @@ export default function ETD8A12Panel() {
   const runRuleByKey = async (ruleKey) => {
     await withGlobalLoader(async () => {
       try {
-        const result = await apiFetch(`/rules/${encodeURIComponent(ruleKey)}/run`, {
-          method: "POST",
-        });
+        const result = await apiFetch(
+          `/rules/${encodeURIComponent(ruleKey)}/run`,
+          {
+            method: "POST",
+          },
+        );
+        if (result?.queued) {
+          const pendingKey = result.pending_manual_mode || ruleKey;
+          setPendingManualEnclavamientoMode(pendingKey);
+          const blocked = (result.blocked_inputs || []).join(", ");
+          addUI(
+            "WARN",
+            blocked
+              ? `${toModeLabel(pendingKey)} en cola: se activará cuando se liberen ${blocked}`
+              : `${toModeLabel(pendingKey)} en cola hasta que se liberen las entradas de bloqueo`,
+          );
+          applyAutoRulesPanelFeedback(result, addUI, setActiveToggleRules);
+          return;
+        }
         if (result?.executed) {
+          setPendingManualEnclavamientoMode(null);
           const rule = rulesMapRef.current[ruleKey];
           if (isToggleEnclavamiento(ruleKey, rule)) {
-            const on = result.toggle_action === "on" || result.toggle_active === true;
+            const on =
+              result.toggle_action === "on" || result.toggle_active === true;
             setActiveToggleRules((prev) => {
               const s = new Set(prev);
               if (on) s.add(ruleKey);
@@ -2509,6 +2682,9 @@ export default function ETD8A12Panel() {
     : "Sin modo seleccionado";
   const showGlobalLoader =
     globalLoadingCount > 0 || !initialStatusLoaded || !initialRulesLoaded;
+  const globalLoaderMessage = activatingQueuedMode
+    ? `Activando ${toModeLabel(activatingQueuedMode)}…`
+    : "Procesando...";
 
   return (
     <div
@@ -2520,7 +2696,7 @@ export default function ETD8A12Panel() {
         fontSize: 13,
       }}
     >
-      <GlobalLoader open={showGlobalLoader} message="Procesando..." />
+      <GlobalLoader open={showGlobalLoader} message={globalLoaderMessage} />
       <TopNavbar
         title="Control de Accesos - ETD8A12"
         tabs={TABS}
@@ -2538,6 +2714,25 @@ export default function ETD8A12Panel() {
           >
             <Card>
               <SecLabel>Modo Operativo</SecLabel>
+              {pendingManualEnclavamientoMode && (
+                <div
+                  style={{
+                    marginBottom: 10,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    background: "#fff7ed",
+                    border: "1px solid #fdba74",
+                    fontSize: 11,
+                    lineHeight: 1.4,
+                    color: "#9a3412",
+                  }}
+                >
+                  <strong>En cola:</strong>{" "}
+                  {toModeLabel(pendingManualEnclavamientoMode)}. Se activará
+                  automáticamente cuando las entradas de bloqueo (p. ej. IN 10 —
+                  alarma conectada) pasen a inactivas.
+                </div>
+              )}
               {/* <div
                 style={{
                   marginBottom: 10,
@@ -2569,58 +2764,66 @@ export default function ETD8A12Panel() {
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {Object.keys(rulesMap)
                   .filter(
-                    (ruleKey) =>
-                      rulesMap[ruleKey]?.type === "enclavamiento",
+                    (ruleKey) => rulesMap[ruleKey]?.type === "enclavamiento",
                   )
                   .map((ruleKey) => {
-                  const rule = rulesMap[ruleKey];
-                  const isHorarioMode = ruleKey.startsWith("horario_");
-                  const isModeActive =
-                    isHorarioMode && selectedMode === ruleKey;
-                  const isToggleOn =
-                    isToggleEnclavamiento(ruleKey, rule) &&
-                    activeToggleRules.includes(ruleKey);
-                  return (
-                    <button
-                      key={ruleKey}
-                      onClick={() => runRuleByKey(ruleKey)}
-                      className="flex items-center gap-2"
-                      style={{
-                        textAlign: "left",
-                        padding: "8px 10px",
-                        borderRadius: 8,
-                        border: `1px solid ${
-                          isModeActive
-                            ? C.red
+                    const rule = rulesMap[ruleKey];
+                    const isHorarioMode = ruleKey.startsWith("horario_");
+                    const isModeActive =
+                      isHorarioMode && selectedMode === ruleKey;
+                    const isToggleOn =
+                      isToggleEnclavamiento(ruleKey, rule) &&
+                      activeToggleRules.includes(ruleKey);
+                    const isQueued =
+                      isHorarioMode &&
+                      pendingManualEnclavamientoMode === ruleKey;
+                    return (
+                      <button
+                        key={ruleKey}
+                        onClick={() => runRuleByKey(ruleKey)}
+                        className="flex items-center gap-2"
+                        style={{
+                          textAlign: "left",
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: `1px solid ${
+                            isModeActive
+                              ? C.red
+                              : isQueued
+                                ? "#fdba74"
+                                : isToggleOn
+                                  ? C.blue
+                                  : C.border
+                          }`,
+                          background: isModeActive
+                            ? "linear-gradient(90deg, #E50914 0%, #B20710 100%)"
+                            : isQueued
+                              ? "#fff7ed"
+                              : isToggleOn
+                                ? C.blueLight
+                                : C.white,
+                          color: isModeActive
+                            ? C.white
                             : isToggleOn
                               ? C.blue
-                              : C.border
-                        }`,
-                        background: isModeActive
-                          ? "linear-gradient(90deg, #E50914 0%, #B20710 100%)"
-                          : isToggleOn
-                            ? C.blueLight
-                            : C.white,
-                        color: isModeActive
-                          ? C.white
-                          : isToggleOn
-                            ? C.blue
-                            : colors.textSecondary,
-                        cursor: "pointer",
-                        fontSize: 12,
-                        fontWeight: isModeActive || isToggleOn ? 700 : 500,
-                      }}
-                    >
-                      <FontAwesomeIcon
-                        color={
-                          isModeActive ? C.white : isToggleOn ? C.blue : C.red
-                        }
-                        icon={faSliders}
-                      />
-                      {toModeLabel(ruleKey)}
-                    </button>
-                  );
-                })}
+                              : colors.textSecondary,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight:
+                            isModeActive || isToggleOn || isQueued ? 700 : 500,
+                        }}
+                      >
+                        <FontAwesomeIcon
+                          color={
+                            isModeActive ? C.white : isToggleOn ? C.blue : C.red
+                          }
+                          icon={faSliders}
+                        />
+                        {toModeLabel(ruleKey)}
+                        {isQueued ? " (en cola)" : ""}
+                      </button>
+                    );
+                  })}
               </div>
             </Card>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -3012,7 +3215,15 @@ export default function ETD8A12Panel() {
                           {nIn || 0}
                         </strong>
                       </div>
-                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          marginTop: 8,
+                          flexWrap: "wrap",
+                          alignItems: "center",
+                        }}
+                      >
                         <Btn
                           small
                           onClick={() => doAllOn(mid)}
@@ -3052,8 +3263,7 @@ export default function ETD8A12Panel() {
                               ref={(el) => {
                                 if (el) {
                                   el.indeterminate =
-                                    b.connected &&
-                                    b.in_out_associated == null;
+                                    b.connected && b.in_out_associated == null;
                                 }
                               }}
                               checked={b.in_out_associated === true}
@@ -3237,8 +3447,9 @@ export default function ETD8A12Panel() {
                 b.input_overrides?.length || 0,
               );
               const outputsActive = (b.outputs || []).filter(Boolean).length;
-              const inputsActive = Array.from({ length: nInIo }, (_, i) =>
-                inputChannelState(b, i).effective,
+              const inputsActive = Array.from(
+                { length: nInIo },
+                (_, i) => inputChannelState(b, i).effective,
               ).filter(Boolean).length;
               return (
                 <Card
@@ -3318,7 +3529,9 @@ export default function ETD8A12Panel() {
                       >
                         Salidas activas
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: C.red }}>
+                      <div
+                        style={{ fontSize: 14, fontWeight: 700, color: C.red }}
+                      >
                         {outputsActive}/{b.outputs?.length || 0}
                       </div>
                     </div>
@@ -3341,7 +3554,11 @@ export default function ETD8A12Panel() {
                         Entradas activas
                       </div>
                       <div
-                        style={{ fontSize: 14, fontWeight: 700, color: C.amber }}
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: C.amber,
+                        }}
                       >
                         {inputsActive}/{b.inputs?.length || 0}
                       </div>
@@ -3359,7 +3576,10 @@ export default function ETD8A12Panel() {
                       gap: 6,
                     }}
                   >
-                    <FontAwesomeIcon icon={faToggleOn} style={{ color: C.red }} />
+                    <FontAwesomeIcon
+                      icon={faToggleOn}
+                      style={{ color: C.red }}
+                    />
                     Salidas
                   </div>
                   <div
@@ -3373,7 +3593,11 @@ export default function ETD8A12Panel() {
                     {(b.outputs || []).map((v, i) => (
                       <div
                         key={i}
-                        title={channelIoTitle("output", i, modCfg?.outputs?.[i])}
+                        title={channelIoTitle(
+                          "output",
+                          i,
+                          modCfg?.outputs?.[i],
+                        )}
                         style={{
                           border: `1px solid ${v ? C.redBorder : C.border}`,
                           background: v ? C.redFaint : C.white,
@@ -3415,9 +3639,14 @@ export default function ETD8A12Panel() {
                       return (
                         <div
                           key={i}
-                          title={channelIoTitle("input", i, modCfg?.inputs?.[i], {
-                            activeByOverride: st.activeByOverride,
-                          })}
+                          title={channelIoTitle(
+                            "input",
+                            i,
+                            modCfg?.inputs?.[i],
+                            {
+                              activeByOverride: st.activeByOverride,
+                            },
+                          )}
                           style={{
                             border: `1px solid ${
                               st.forcedOn
@@ -3647,7 +3876,9 @@ export default function ETD8A12Panel() {
                           >
                             {e.actor_principal || "system"}
                           </span>
-                          <span>{e.board ? `Placa ${e.board}` : "Sin placa"}</span>
+                          <span>
+                            {e.board ? `Placa ${e.board}` : "Sin placa"}
+                          </span>
                         </div>
                         <div
                           style={{
@@ -3686,493 +3917,42 @@ export default function ETD8A12Panel() {
         {(tab === 3 || tab === 5) && (
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {tab === 5 && (
-            <Card>
-              <SecLabel>Configuración zaguán (ESP32)</SecLabel>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: 10,
-                  alignItems: "end",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>IP/Host ESP32</div>
-                  <input
-                    value={zaguanTarget.host}
-                    onChange={(e) =>
-                      setZaguanTarget((p) => ({ ...p, host: e.target.value }))
-                    }
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 6,
-                    }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Puerto</div>
-                  <input
-                    type="number"
-                    value={zaguanTarget.port}
-                    onChange={(e) =>
-                      setZaguanTarget((p) => ({
-                        ...p,
-                        port: Number(e.target.value || 80),
-                      }))
-                    }
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 6,
-                    }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Timeout (s)</div>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={zaguanTarget.timeout_s}
-                    onChange={(e) =>
-                      setZaguanTarget((p) => ({
-                        ...p,
-                        timeout_s: Number(e.target.value || 2),
-                      }))
-                    }
-                    style={{
-                      width: "100%",
-                      padding: 8,
-                      border: `1px solid ${C.border}`,
-                      borderRadius: 6,
-                    }}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <Btn variant="primary" onClick={saveZaguanTarget}>
-                    Guardar target
-                  </Btn>
-                  <Btn onClick={pingZaguanDevice}>Ping</Btn>
-                  <Btn onClick={readZaguanDeviceEstado}>Leer estado</Btn>
-                  <Btn onClick={readZaguanDeviceOta}>Leer OTA</Btn>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 10,
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-                  gap: 8,
-                  alignItems: "end",
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Flash R</div>
-                  <input
-                    type="number"
-                    value={zaguanFlash.r}
-                    onChange={(e) =>
-                      setZaguanFlash((p) => ({ ...p, r: Number(e.target.value || 0) }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Flash G</div>
-                  <input
-                    type="number"
-                    value={zaguanFlash.g}
-                    onChange={(e) =>
-                      setZaguanFlash((p) => ({ ...p, g: Number(e.target.value || 0) }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Flash B</div>
-                  <input
-                    type="number"
-                    value={zaguanFlash.b}
-                    onChange={(e) =>
-                      setZaguanFlash((p) => ({ ...p, b: Number(e.target.value || 0) }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Destellos</div>
-                  <input
-                    type="number"
-                    value={zaguanFlash.n_flashes}
-                    onChange={(e) =>
-                      setZaguanFlash((p) => ({
-                        ...p,
-                        n_flashes: Number(e.target.value || 3),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, marginBottom: 6 }}>Duración ms</div>
-                  <input
-                    type="number"
-                    value={zaguanFlash.duracion_ms}
-                    onChange={(e) =>
-                      setZaguanFlash((p) => ({
-                        ...p,
-                        duracion_ms: Number(e.target.value || 120),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                </div>
-                <div>
-                  <Btn variant="primary" onClick={saveZaguanFlash}>
-                    Guardar flash
-                  </Btn>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: `1px dashed ${C.border}`,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                  Config red/backend (`POST /api/zaguan/device/config/red`)
-                </div>
+              <Card>
+                <SecLabel>Configuración zaguán (ESP32)</SecLabel>
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                    gap: 8,
+                    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                    gap: 10,
                     alignItems: "end",
                   }}
                 >
-                  <input
-                    placeholder="IP ESP32"
-                    value={zaguanConfigRed.ip}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({ ...p, ip: e.target.value }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    placeholder="Gateway"
-                    value={zaguanConfigRed.gateway}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({ ...p, gateway: e.target.value }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    placeholder="Subnet"
-                    value={zaguanConfigRed.subnet}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({ ...p, subnet: e.target.value }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    placeholder="IP backend"
-                    value={zaguanConfigRed.backend_ip}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({
-                        ...p,
-                        backend_ip: e.target.value,
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Puerto backend"
-                    value={zaguanConfigRed.backend_puerto}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({
-                        ...p,
-                        backend_puerto: Number(e.target.value || 8000),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    placeholder="/zaguan/estado"
-                    value={zaguanConfigRed.backend_ruta}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({
-                        ...p,
-                        backend_ruta: e.target.value,
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    placeholder="/zaguan/pulsacion"
-                    value={zaguanConfigRed.pulsacion_ruta}
-                    onChange={(e) =>
-                      setZaguanConfigRed((p) => ({
-                        ...p,
-                        pulsacion_ruta: e.target.value,
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <Btn variant="primary" onClick={saveZaguanConfigRed}>
-                    Guardar red/backend
-                  </Btn>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: `1px dashed ${C.border}`,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                  Config canal (`POST /api/zaguan/device/config/canal`)
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: 8,
-                    alignItems: "end",
-                  }}
-                >
-                  <input
-                    type="number"
-                    min={1}
-                    max={4}
-                    value={zaguanConfigCanal.canal}
-                    onChange={(e) =>
-                      setZaguanConfigCanal((p) => ({
-                        ...p,
-                        canal: Number(e.target.value || 1),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={zaguanConfigCanal.leds}
-                    onChange={(e) =>
-                      setZaguanConfigCanal((p) => ({
-                        ...p,
-                        leds: Number(e.target.value || 1),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={255}
-                    value={zaguanConfigCanal.brillo}
-                    onChange={(e) =>
-                      setZaguanConfigCanal((p) => ({
-                        ...p,
-                        brillo: Number(e.target.value || 0),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <Btn variant="primary" onClick={saveZaguanConfigCanal}>
-                    Guardar canal
-                  </Btn>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 12,
-                  paddingTop: 12,
-                  borderTop: `1px dashed ${C.border}`,
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>
-                  Config estado (`POST /api/zaguan/device/config/estado`)
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                    gap: 8,
-                    alignItems: "end",
-                  }}
-                >
-                  <select
-                    value={zaguanConfigEstado.estado}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({ ...p, estado: e.target.value }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  >
-                    <option value="libre">libre</option>
-                    <option value="ocupado">ocupado</option>
-                    <option value="abriendo">abriendo</option>
-                    <option value="apagado">apagado</option>
-                  </select>
-                  <input
-                    type="number"
-                    min={1}
-                    max={4}
-                    value={zaguanConfigEstado.canal}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        canal: Number(e.target.value || 1),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <select
-                    value={zaguanConfigEstado.animacion}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        animacion: e.target.value,
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  >
-                    <option value="fijo">fijo</option>
-                    <option value="respiracion">respiracion</option>
-                    <option value="parpadeo">parpadeo</option>
-                    <option value="barrido">barrido</option>
-                  </select>
-                  <input
-                    type="number"
-                    value={zaguanConfigEstado.velocidad}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        velocidad: Number(e.target.value || 0),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={255}
-                    value={zaguanConfigEstado.color_r}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        color_r: Number(e.target.value || 0),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={255}
-                    value={zaguanConfigEstado.color_g}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        color_g: Number(e.target.value || 0),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <input
-                    type="number"
-                    min={0}
-                    max={255}
-                    value={zaguanConfigEstado.color_b}
-                    onChange={(e) =>
-                      setZaguanConfigEstado((p) => ({
-                        ...p,
-                        color_b: Number(e.target.value || 0),
-                      }))
-                    }
-                    style={{ width: "100%", padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}
-                  />
-                  <Btn variant="primary" onClick={saveZaguanConfigEstado}>
-                    Guardar estado visual
-                  </Btn>
-                </div>
-              </div>
-
-              <div style={{ marginTop: 10, fontSize: 11, color: C.textSub }}>
-                {zaguanPing ? `Ping: ${JSON.stringify(zaguanPing)}` : "Ping: —"}
-                <br />
-                {zaguanEstado
-                  ? `Estado: ${JSON.stringify(zaguanEstado)}`
-                  : "Estado dispositivo: —"}
-                <br />
-                {zaguanOta ? `OTA: ${JSON.stringify(zaguanOta)}` : "OTA: —"}
-              </div>
-            </Card>
-            )}
-            {tab === 3 && (
-              <>
-            <RulesFormAssistant
-              moduleList={moduleList}
-              rulesJson={rulesJson}
-              setRulesJson={setRulesJson}
-              rulesMap={rulesMap}
-              setRulesMap={setRulesMap}
-              addUI={addUI}
-              setSelectedMode={setSelectedMode}
-            />
-            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-              {orderedModuleIds.map((mid) => {
-                const m = metaFor(mid);
-                const mod = moduleList.find((x) => x.id === mid);
-                const host = boardConfigs[mid]?.host ?? mod?.host ?? "";
-                const port = boardConfigs[mid]?.port ?? mod?.port ?? 5000;
-                const slave_id =
-                  boardConfigs[mid]?.slave_id ?? mod?.slave_id ?? 1;
-                return (
-                  <Card key={mid} style={{ flex: "1 1 300px" }}>
-                    <SecLabel>{m.name}</SecLabel>
-                    <div style={{ fontSize: 11, marginBottom: 6 }}>IP</div>
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>
+                      IP/Host ESP32
+                    </div>
                     <input
-                      value={host}
+                      value={zaguanTarget.host}
                       onChange={(e) =>
-                        setConfigs((p) => ({
-                          ...p,
-                          [mid]: {
-                            host: e.target.value,
-                            port: p[mid]?.port ?? port,
-                            slave_id: p[mid]?.slave_id ?? slave_id,
-                          },
-                        }))
+                        setZaguanTarget((p) => ({ ...p, host: e.target.value }))
                       }
                       style={{
                         width: "100%",
                         padding: 8,
                         border: `1px solid ${C.border}`,
                         borderRadius: 6,
-                        marginBottom: 8,
                       }}
                     />
+                  </div>
+                  <div>
                     <div style={{ fontSize: 11, marginBottom: 6 }}>Puerto</div>
                     <input
                       type="number"
-                      value={port}
+                      value={zaguanTarget.port}
                       onChange={(e) =>
-                        setConfigs((p) => ({
+                        setZaguanTarget((p) => ({
                           ...p,
-                          [mid]: {
-                            host: p[mid]?.host ?? host,
-                            port: Number(e.target.value || 5000),
-                            slave_id: p[mid]?.slave_id ?? slave_id,
-                          },
+                          port: Number(e.target.value || 80),
                         }))
                       }
                       style={{
@@ -4180,23 +3960,21 @@ export default function ETD8A12Panel() {
                         padding: 8,
                         border: `1px solid ${C.border}`,
                         borderRadius: 6,
-                        marginBottom: 8,
                       }}
                     />
+                  </div>
+                  <div>
                     <div style={{ fontSize: 11, marginBottom: 6 }}>
-                      Slave ID
+                      Timeout (s)
                     </div>
                     <input
                       type="number"
-                      value={slave_id}
+                      step="0.1"
+                      value={zaguanTarget.timeout_s}
                       onChange={(e) =>
-                        setConfigs((p) => ({
+                        setZaguanTarget((p) => ({
                           ...p,
-                          [mid]: {
-                            host: p[mid]?.host ?? host,
-                            port: p[mid]?.port ?? port,
-                            slave_id: normalizeSlaveId(e.target.value),
-                          },
+                          timeout_s: Number(e.target.value || 2),
                         }))
                       }
                       style={{
@@ -4204,42 +3982,649 @@ export default function ETD8A12Panel() {
                         padding: 8,
                         border: `1px solid ${C.border}`,
                         borderRadius: 6,
-                        marginBottom: 8,
                       }}
                     />
-                    <Btn variant="primary" onClick={() => doConfig(mid)}>
-                      Aplicar configuración
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn variant="primary" onClick={saveZaguanTarget}>
+                      Guardar target
                     </Btn>
-                  </Card>
-                );
-              })}
-              <Card style={{ flex: "2 1 620px" }}>
-                <SecLabel>Editor JSON de reglas</SecLabel>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
-                  Define trigger, bloqueos, enclavamiento y salidas para cada
-                  modo que crees (o edita el JSON a mano).
+                    <Btn onClick={pingZaguanDevice}>Ping</Btn>
+                    <Btn onClick={readZaguanDeviceEstado}>Leer estado</Btn>
+                    <Btn onClick={readZaguanDeviceOta}>Leer OTA</Btn>
+                  </div>
                 </div>
-                <textarea
-                  value={rulesJson}
-                  onChange={(e) => setRulesJson(e.target.value)}
+
+                <div
                   style={{
-                    width: "100%",
-                    minHeight: 260,
-                    padding: 10,
-                    border: `1px solid ${C.border}`,
-                    borderRadius: 6,
-                    fontFamily: "Consolas, monospace",
-                    fontSize: 12,
+                    marginTop: 10,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                    gap: 8,
+                    alignItems: "end",
                   }}
-                />
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <Btn variant="primary" onClick={saveRulesJson}>
-                    Guardar reglas JSON
-                  </Btn>
-                  <Btn onClick={evaluateRulesNow}>Evaluar reglas ahora</Btn>
+                >
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>Flash R</div>
+                    <input
+                      type="number"
+                      value={zaguanFlash.r}
+                      onChange={(e) =>
+                        setZaguanFlash((p) => ({
+                          ...p,
+                          r: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>Flash G</div>
+                    <input
+                      type="number"
+                      value={zaguanFlash.g}
+                      onChange={(e) =>
+                        setZaguanFlash((p) => ({
+                          ...p,
+                          g: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>Flash B</div>
+                    <input
+                      type="number"
+                      value={zaguanFlash.b}
+                      onChange={(e) =>
+                        setZaguanFlash((p) => ({
+                          ...p,
+                          b: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>
+                      Destellos
+                    </div>
+                    <input
+                      type="number"
+                      value={zaguanFlash.n_flashes}
+                      onChange={(e) =>
+                        setZaguanFlash((p) => ({
+                          ...p,
+                          n_flashes: Number(e.target.value || 3),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, marginBottom: 6 }}>
+                      Duración ms
+                    </div>
+                    <input
+                      type="number"
+                      value={zaguanFlash.duracion_ms}
+                      onChange={(e) =>
+                        setZaguanFlash((p) => ({
+                          ...p,
+                          duracion_ms: Number(e.target.value || 120),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <Btn variant="primary" onClick={saveZaguanFlash}>
+                      Guardar flash
+                    </Btn>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: `1px dashed ${C.border}`,
+                  }}
+                >
+                  <div
+                    style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}
+                  >
+                    Config red/backend (`POST /api/zaguan/device/config/red`)
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(160px, 1fr))",
+                      gap: 8,
+                      alignItems: "end",
+                    }}
+                  >
+                    <input
+                      placeholder="IP ESP32"
+                      value={zaguanConfigRed.ip}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          ip: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      placeholder="Gateway"
+                      value={zaguanConfigRed.gateway}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          gateway: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      placeholder="Subnet"
+                      value={zaguanConfigRed.subnet}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          subnet: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      placeholder="IP backend"
+                      value={zaguanConfigRed.backend_ip}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          backend_ip: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      placeholder="Puerto backend"
+                      value={zaguanConfigRed.backend_puerto}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          backend_puerto: Number(e.target.value || 8000),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      placeholder="/zaguan/estado"
+                      value={zaguanConfigRed.backend_ruta}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          backend_ruta: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      placeholder="/zaguan/pulsacion"
+                      value={zaguanConfigRed.pulsacion_ruta}
+                      onChange={(e) =>
+                        setZaguanConfigRed((p) => ({
+                          ...p,
+                          pulsacion_ruta: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <Btn variant="primary" onClick={saveZaguanConfigRed}>
+                      Guardar red/backend
+                    </Btn>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: `1px dashed ${C.border}`,
+                  }}
+                >
+                  <div
+                    style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}
+                  >
+                    Config canal (`POST /api/zaguan/device/config/canal`)
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(140px, 1fr))",
+                      gap: 8,
+                      alignItems: "end",
+                    }}
+                  >
+                    <input
+                      type="number"
+                      min={1}
+                      max={4}
+                      value={zaguanConfigCanal.canal}
+                      onChange={(e) =>
+                        setZaguanConfigCanal((p) => ({
+                          ...p,
+                          canal: Number(e.target.value || 1),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={zaguanConfigCanal.leds}
+                      onChange={(e) =>
+                        setZaguanConfigCanal((p) => ({
+                          ...p,
+                          leds: Number(e.target.value || 1),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={zaguanConfigCanal.brillo}
+                      onChange={(e) =>
+                        setZaguanConfigCanal((p) => ({
+                          ...p,
+                          brillo: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <Btn variant="primary" onClick={saveZaguanConfigCanal}>
+                      Guardar canal
+                    </Btn>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: `1px dashed ${C.border}`,
+                  }}
+                >
+                  <div
+                    style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}
+                  >
+                    Config estado (`POST /api/zaguan/device/config/estado`)
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(140px, 1fr))",
+                      gap: 8,
+                      alignItems: "end",
+                    }}
+                  >
+                    <select
+                      value={zaguanConfigEstado.estado}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          estado: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <option value="libre">libre</option>
+                      <option value="ocupado">ocupado</option>
+                      <option value="abriendo">abriendo</option>
+                      <option value="apagado">apagado</option>
+                    </select>
+                    <input
+                      type="number"
+                      min={1}
+                      max={4}
+                      value={zaguanConfigEstado.canal}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          canal: Number(e.target.value || 1),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <select
+                      value={zaguanConfigEstado.animacion}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          animacion: e.target.value,
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    >
+                      <option value="fijo">fijo</option>
+                      <option value="respiracion">respiracion</option>
+                      <option value="parpadeo">parpadeo</option>
+                      <option value="barrido">barrido</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={zaguanConfigEstado.velocidad}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          velocidad: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={zaguanConfigEstado.color_r}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          color_r: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={zaguanConfigEstado.color_g}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          color_g: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={zaguanConfigEstado.color_b}
+                      onChange={(e) =>
+                        setZaguanConfigEstado((p) => ({
+                          ...p,
+                          color_b: Number(e.target.value || 0),
+                        }))
+                      }
+                      style={{
+                        width: "100%",
+                        padding: 8,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                      }}
+                    />
+                    <Btn variant="primary" onClick={saveZaguanConfigEstado}>
+                      Guardar estado visual
+                    </Btn>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 10, fontSize: 11, color: C.textSub }}>
+                  {zaguanPing
+                    ? `Ping: ${JSON.stringify(zaguanPing)}`
+                    : "Ping: —"}
+                  <br />
+                  {zaguanEstado
+                    ? `Estado: ${JSON.stringify(zaguanEstado)}`
+                    : "Estado dispositivo: —"}
+                  <br />
+                  {zaguanOta ? `OTA: ${JSON.stringify(zaguanOta)}` : "OTA: —"}
                 </div>
               </Card>
-            </div>
+            )}
+            {tab === 3 && (
+              <>
+                <RulesFormAssistant
+                  moduleList={moduleList}
+                  rulesJson={rulesJson}
+                  setRulesJson={setRulesJson}
+                  rulesMap={rulesMap}
+                  setRulesMap={setRulesMap}
+                  addUI={addUI}
+                  setSelectedMode={setSelectedMode}
+                />
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {orderedModuleIds.map((mid) => {
+                    const m = metaFor(mid);
+                    const mod = moduleList.find((x) => x.id === mid);
+                    const host = boardConfigs[mid]?.host ?? mod?.host ?? "";
+                    const port = boardConfigs[mid]?.port ?? mod?.port ?? 5000;
+                    const slave_id =
+                      boardConfigs[mid]?.slave_id ?? mod?.slave_id ?? 1;
+                    return (
+                      <Card key={mid} style={{ flex: "1 1 300px" }}>
+                        <SecLabel>{m.name}</SecLabel>
+                        <div style={{ fontSize: 11, marginBottom: 6 }}>IP</div>
+                        <input
+                          value={host}
+                          onChange={(e) =>
+                            setConfigs((p) => ({
+                              ...p,
+                              [mid]: {
+                                host: e.target.value,
+                                port: p[mid]?.port ?? port,
+                                slave_id: p[mid]?.slave_id ?? slave_id,
+                              },
+                            }))
+                          }
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 6,
+                            marginBottom: 8,
+                          }}
+                        />
+                        <div style={{ fontSize: 11, marginBottom: 6 }}>
+                          Puerto
+                        </div>
+                        <input
+                          type="number"
+                          value={port}
+                          onChange={(e) =>
+                            setConfigs((p) => ({
+                              ...p,
+                              [mid]: {
+                                host: p[mid]?.host ?? host,
+                                port: Number(e.target.value || 5000),
+                                slave_id: p[mid]?.slave_id ?? slave_id,
+                              },
+                            }))
+                          }
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 6,
+                            marginBottom: 8,
+                          }}
+                        />
+                        <div style={{ fontSize: 11, marginBottom: 6 }}>
+                          Slave ID
+                        </div>
+                        <input
+                          type="number"
+                          value={slave_id}
+                          onChange={(e) =>
+                            setConfigs((p) => ({
+                              ...p,
+                              [mid]: {
+                                host: p[mid]?.host ?? host,
+                                port: p[mid]?.port ?? port,
+                                slave_id: normalizeSlaveId(e.target.value),
+                              },
+                            }))
+                          }
+                          style={{
+                            width: "100%",
+                            padding: 8,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 6,
+                            marginBottom: 8,
+                          }}
+                        />
+                        <Btn variant="primary" onClick={() => doConfig(mid)}>
+                          Aplicar configuración
+                        </Btn>
+                      </Card>
+                    );
+                  })}
+                  <Card style={{ flex: "2 1 620px" }}>
+                    <SecLabel>Editor JSON de reglas</SecLabel>
+                    <div
+                      style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}
+                    >
+                      Define trigger, bloqueos, enclavamiento y salidas para
+                      cada modo que crees (o edita el JSON a mano).
+                    </div>
+                    <textarea
+                      value={rulesJson}
+                      onChange={(e) => setRulesJson(e.target.value)}
+                      style={{
+                        width: "100%",
+                        minHeight: 260,
+                        padding: 10,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 6,
+                        fontFamily: "Consolas, monospace",
+                        fontSize: 12,
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      <Btn variant="primary" onClick={saveRulesJson}>
+                        Guardar reglas JSON
+                      </Btn>
+                      <Btn onClick={evaluateRulesNow}>Evaluar reglas ahora</Btn>
+                    </div>
+                  </Card>
+                </div>
               </>
             )}
           </div>

@@ -64,6 +64,7 @@ def _build_status_payload() -> dict[str, Any]:
         "modules_config": pms.get_full_config_for_api(),
         "current_mode": current_mode,
         "active_toggle_rules": sorted(active_toggle_rules),
+        "pending_manual_enclavamiento_mode": pending_manual_enclavamiento_mode,
         "timestamp": datetime.now().isoformat(),
     }
 
@@ -122,6 +123,66 @@ def _rule_owns_operational_mode(rule: dict, rule_key: str) -> bool:
     if rule_key.startswith(HORARIO_MODE_KEY_PREFIX):
         return True
     return rule_key in EMERGENCY_MODE_RULE_KEYS
+
+
+def _rule_eligible_for_manual_queue(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """Modos operativos enclavamiento (horarios / incendio global), no interruptores ni pulso."""
+    r = rule if rule is not None else rules_config.get(rule_key) or {}
+    return _rule_owns_operational_mode(r, rule_key)
+
+
+def _blocked_active_codes_for_rule(rule: dict) -> List[str]:
+    return [
+        code
+        for code in rule.get("blocked_if_active", [])
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=True,
+            use_overrides=True,
+            physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
+        )
+    ]
+
+
+def _set_pending_manual_enclavamiento(rule_key: str) -> None:
+    global pending_manual_enclavamiento_mode
+    pending_manual_enclavamiento_mode = rule_key
+    add_event(
+        "INFO",
+        f"Modo {rule_key} en cola (esperando liberar bloqueos)",
+        1,
+    )
+
+
+def _clear_pending_manual_enclavamiento() -> None:
+    global pending_manual_enclavamiento_mode
+    pending_manual_enclavamiento_mode = None
+
+
+def _try_execute_pending_manual_enclavamiento(
+    *, apply_outputs_to_hardware: bool = True
+) -> Optional[dict]:
+    """Reintenta el modo en cola cuando ya no hay entradas de bloqueo activas."""
+    global pending_manual_enclavamiento_mode
+    rk = pending_manual_enclavamiento_mode
+    if not rk:
+        return None
+    rule = rules_config.get(rk)
+    if not rule or not rule.get("enabled", True):
+        _clear_pending_manual_enclavamiento()
+        return None
+    if not _rule_eligible_for_manual_queue(rk, rule):
+        _clear_pending_manual_enclavamiento()
+        return None
+    if _blocked_active_codes_for_rule(rule):
+        return None
+    result = _execute_rule_forced(rk, apply_outputs_to_hardware=apply_outputs_to_hardware)
+    if result.get("executed"):
+        add_event("OK", f"Modo en cola ejecutado: {rk}", 1)
+        return result
+    if not result.get("queued"):
+        _clear_pending_manual_enclavamiento()
+    return result if result.get("executed") else None
 
 
 def _rule_is_emergency_operational(rule_key: str) -> bool:
@@ -334,6 +395,7 @@ def _save_rules_to_disk(rules: Dict[str, dict]) -> None:
 
 rules_config: Dict[str, dict] = _load_rules_from_disk()
 rules_runtime: Dict[str, dict] = {}
+pending_manual_enclavamiento_mode: Optional[str] = None
 background_auto_rules_last_run_at: Optional[str] = None
 background_auto_rules_last_result: Dict[str, Any] = {}
 background_auto_rules_last_error: Optional[str] = None
@@ -2179,6 +2241,9 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     pending_restores = _process_pending_temp_deactivate_restores(
         apply_outputs_to_hardware=True
     )
+    pending_mode_result = _try_execute_pending_manual_enclavamiento(
+        apply_outputs_to_hardware=True
+    )
     for rk, rule in rules_config.items():
         if not rule.get("enabled", True):
             continue
@@ -2223,6 +2288,10 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
         "executed_rules": executed,
         "deactivated_rules": deactivated,
         "pending_temp_restores": pending_restores,
+        "pending_mode_executed": bool(
+            pending_mode_result and pending_mode_result.get("executed")
+        ),
+        "pending_manual_mode": pending_manual_enclavamiento_mode,
         "errors": errors,
         "error_messages": error_messages[:10],
         "blocked_rules": blocked_rules[:20],
@@ -2262,25 +2331,27 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         return {"executed": False, "reason": "Regla deshabilitada", "rule": rule_key}
 
     # Incluso en ejecución forzada, respetar bloqueos por entradas activas (IN según panel_rules_triggers_use_physical_inputs).
-    blocked_codes = rule.get("blocked_if_active", [])
-    blocked_active_codes = [
-        code
-        for code in blocked_codes
-        if _blocked_signal_active(
-            code,
-            use_hardware_if_no_override=True,
-            use_overrides=True,
-            physical_inputs=bool(settings.panel_rules_triggers_use_physical_inputs),
-        )
-    ]
+    blocked_active_codes = _blocked_active_codes_for_rule(rule)
     if blocked_active_codes:
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        if _rule_eligible_for_manual_queue(rule_key, rule):
+            _set_pending_manual_enclavamiento(rule_key)
+            return {
+                "executed": False,
+                "queued": True,
+                "pending_manual_mode": rule_key,
+                "rule": rule_key,
+                "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+                "blocked_inputs": blocked_active_codes,
+            }
         return {
             "executed": False,
             "rule": rule_key,
             "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
             "blocked_inputs": blocked_active_codes,
         }
+
+    _clear_pending_manual_enclavamiento()
 
     if rule.get("type") == PULSE_5_SG_TYPE:
         trigger_code = rule.get("trigger") or "IN_01_01"
@@ -2514,6 +2585,8 @@ def get_status(
     if run_auto_rules:
         # Si ya se refrescó hardware arriba, no repetir Modbus por cada regla (RTU).
         _evaluate_auto_rules(use_hardware_if_no_override=not refresh_hardware)
+    elif refresh_hardware:
+        _try_execute_pending_manual_enclavamiento(apply_outputs_to_hardware=True)
     payload = _build_status_payload()
     payload["auto_rules_executed"] = run_auto_rules
     return payload
@@ -3000,6 +3073,7 @@ def get_rules_state():
     return {
         "current_mode": current_mode,
         "active_toggle_rules": sorted(active_toggle_rules),
+        "pending_manual_enclavamiento_mode": pending_manual_enclavamiento_mode,
         "mode_latches": mode_latches,
         "rules": rules_config,
         "runtime": rules_runtime,

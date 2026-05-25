@@ -143,6 +143,13 @@ def set_mode(
         rk = body.rule_key.strip()  # type: ignore[union-attr]
         if body.active:
             result = panel.api_v1_execute_rule_for_tablet(rk)
+            if result.get("queued"):
+                return {
+                    "ok": True,
+                    "action": "set_rule",
+                    "queued": True,
+                    "result": result,
+                }
             if not bool(result.get("executed", False)):
                 reason = str(result.get("reason") or "Regla bloqueada")
                 blocked_inputs = result.get("blocked_inputs") or []
