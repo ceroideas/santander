@@ -1388,6 +1388,7 @@ def _evaluate_pulse_5_sg_rule(
             }
 
         if blocked_active_codes:
+            _clear_trigger_input_override(trigger_code)
             add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
             return {
                 "executed": False,
@@ -1448,10 +1449,12 @@ def _evaluate_pulse_5_sg_rule(
     rising = bool(trigger_active) and not bool(runtime.get("last_trigger_active"))
 
     if rising and blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
 
     if manual:
         if blocked_active_codes:
+            _clear_trigger_input_override(trigger_code)
             add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
             return {
                 "executed": False,
@@ -1540,22 +1543,128 @@ def _trigger_activated_by_panel_override(trigger_code: str, *, manual: bool = Fa
     return input_overrides[board_id][channel - 1] is True
 
 
+def _clear_trigger_input_override(trigger_code: str) -> None:
+    """Si el trigger tenía override (simulación), vuelve a REAL tras bloqueo o denegación."""
+    if not isinstance(trigger_code, str) or not trigger_code.strip():
+        return
+    board_id, channel = _parse_in_code(trigger_code)
+    if input_overrides[board_id][channel - 1] is not None:
+        input_overrides[board_id][channel - 1] = None
+        _persist_overrides_to_db()
+
+
+def _in_code_for_board_channel(board_id: int, channel: int) -> str:
+    return f"IN_{board_id:02d}_{channel:02d}"
+
+
+def _blocked_inputs_for_rule(rule: dict) -> List[str]:
+    phy = bool(settings.panel_rules_triggers_use_physical_inputs)
+    return [
+        code
+        for code in rule.get("blocked_if_active") or []
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=True,
+            use_overrides=True,
+            physical_inputs=phy,
+        )
+    ]
+
+
+def _override_request_blocked(board_id: int, channel: int, state: Optional[bool]) -> Optional[dict]:
+    """Si FORZADA ON dispararía una regla bloqueada, denegar (override queda null)."""
+    if state is not True:
+        return None
+    code = _in_code_for_board_channel(board_id, channel)
+    hits: List[dict] = []
+    for rk, rule in rules_config.items():
+        if not rule.get("enabled", True) or not rule.get("auto_execute", True):
+            continue
+        if rule.get("trigger") != code:
+            continue
+        blocked = _blocked_inputs_for_rule(rule)
+        if blocked:
+            hits.append(
+                {
+                    "rule_key": rk,
+                    "blocked_inputs": blocked,
+                    "reason": f"Bloqueado por entradas activas: {', '.join(blocked)}",
+                }
+            )
+    if not hits:
+        return None
+    return {"denied": True, "blocked_rules": hits}
+
+
+def _snapshot_rule_deactivate_outputs(rule: dict, rule_key: str) -> None:
+    """Guarda qué OUT de deactivate_outputs estaban ON antes de apagarlas (interruptores)."""
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = {}
+    for do_code in rule.get("deactivate_outputs") or []:
+        try:
+            b, ch = _parse_out_code(do_code)
+        except HTTPException:
+            continue
+        if _read_output_cached(b, ch):
+            snap[do_code] = True
+    runtime["temp_deact_snapshot"] = snap
+
+
+def _restore_snapshotted_deactivate_outputs(
+    rule: dict,
+    rule_key: str,
+    *,
+    apply_outputs_to_hardware: bool,
+    origin: str,
+) -> List[str]:
+    """Solo vuelve a ON las salidas que estaban ON en el snapshot (interruptor OFF)."""
+    runtime = _default_rule_runtime(rule_key)
+    snap: Dict[str, bool] = dict(runtime.get("temp_deact_snapshot") or {})
+    if not snap:
+        return []
+    restored: List[str] = []
+    for do_code, was_on in snap.items():
+        if not was_on:
+            continue
+        b, ch = _parse_out_code(do_code)
+        if apply_outputs_to_hardware:
+            if io_state.get(b, {}).get("connected"):
+                if _write_output_if_connected(b, ch, True, out_code=do_code, origin=origin):
+                    restored.append(do_code)
+        else:
+            _, outs = pms.get_channels_for_module(b)
+            if 1 <= ch <= len(outs):
+                io_state[b]["outputs"][ch - 1] = True
+                restored.append(do_code)
+    _clear_temp_deactivate_snapshot(rule_key)
+    _cancel_pending_temp_deactivate_restore(rule_key)
+    if restored:
+        add_event(
+            "INFO",
+            f"Restauradas salidas (estaban ON antes de {rule_key}): {', '.join(restored)}",
+            1,
+        )
+    return restored
+
+
+def _mark_toggle_suppress_auto_rising(rule_key: str) -> None:
+    """Evita que el ciclo automático interprete un flanco espurio tras clic en el lateral."""
+    _default_rule_runtime(rule_key)["suppress_auto_rising"] = True
+
+
 def _apply_toggle_enclavamiento_on(
     rule_key: str,
     rule: dict,
     trigger_code: str,
     *,
-    activated_by_panel_override: bool,
     apply_outputs_to_hardware: bool,
     blocked_active_codes: List[str],
 ) -> dict:
     """Enciende salidas de una actuación tipo interruptor y la registra en `active_toggle_rules`."""
     global active_toggle_rules
-    by_panel = activated_by_panel_override
-    _apply_enclavamiento_mode_activation(
-        rule, trigger_code, activated_by_panel_override=by_panel
-    )
     origin_tag = f"toggle_on:{rule_key}"
+    _snapshot_rule_deactivate_outputs(rule, rule_key)
     skipped_disconnected: List[str] = []
     for do_code in rule.get("activate_outputs", []):
         board_id, channel = _parse_out_code(do_code)
@@ -1585,6 +1694,8 @@ def _apply_toggle_enclavamiento_on(
         },
     )
     rt["last_executed_at"] = datetime.now().isoformat()
+    rt["last_trigger_active"] = True
+    _mark_toggle_suppress_auto_rising(rule_key)
     add_event("OK", f"Actuación interruptor ON: {rule_key}", 1)
     return {
         "executed": True,
@@ -1607,11 +1718,11 @@ def _apply_toggle_enclavamiento_off(
     apply_outputs_to_hardware: bool,
     blocked_active_codes: Optional[List[str]] = None,
 ) -> dict:
-    """Apaga salidas y quita la actuación del array de interruptores activos."""
+    """Apaga solo las salidas que encendió la regla; no re-activa las que apagó al encender."""
     global active_toggle_rules
     origin_tag = f"toggle_off:{rule_key}"
-    _restore_temp_deactivate_outputs(
-        rule, rule_key, apply_outputs_to_hardware, origin=origin_tag
+    _restore_snapshotted_deactivate_outputs(
+        rule, rule_key, apply_outputs_to_hardware=apply_outputs_to_hardware, origin=origin_tag
     )
     for out_code in rule.get("activate_outputs", []):
         b, ch = _parse_out_code(out_code)
@@ -1624,23 +1735,10 @@ def _apply_toggle_enclavamiento_off(
             _, outs = pms.get_channels_for_module(b)
             if 1 <= ch <= len(outs):
                 io_state[b]["outputs"][ch - 1] = False
-    for out_code in rule.get("deactivate_outputs", []):
-        b, ch = _parse_out_code(out_code)
-        if apply_outputs_to_hardware:
-            if not io_state[b]["connected"]:
-                _connect_board(b)
-            _write_output_if_connected(
-                b, ch, True, out_code=out_code, origin=origin_tag
-            )
-        else:
-            _, outs = pms.get_channels_for_module(b)
-            if 1 <= ch <= len(outs):
-                io_state[b]["outputs"][ch - 1] = True
     trigger_code = rule.get("trigger")
     if isinstance(trigger_code, str) and trigger_code:
         mode_latches[trigger_code] = False
-        tb, tch = _parse_in_code(trigger_code)
-        input_overrides[tb][tch - 1] = None
+        _clear_trigger_input_override(trigger_code)
     active_toggle_rules.discard(rule_key)
     _persist_overrides_to_db()
     _notify_toggle_rules_changed()
@@ -1654,6 +1752,8 @@ def _apply_toggle_enclavamiento_off(
         },
     )
     rt["last_executed_at"] = datetime.now().isoformat()
+    rt["last_trigger_active"] = False
+    _mark_toggle_suppress_auto_rising(rule_key)
     add_event("OK", f"Actuación interruptor OFF: {rule_key}", 1)
     return {
         "executed": True,
@@ -1662,9 +1762,90 @@ def _apply_toggle_enclavamiento_off(
         "mode": current_mode,
         "blocked_inputs": blocked_active_codes or [],
         "outputs_activated": [],
-        "outputs_deactivated": rule.get("deactivate_outputs", []),
+        "outputs_deactivated": [],
         "timestamp": rt["last_executed_at"],
     }
+
+
+def _evaluate_toggle_enclavamiento_rule(
+    rule_key: str,
+    rule: dict,
+    *,
+    use_hardware_if_no_override: bool = True,
+    use_overrides: bool = True,
+    apply_outputs_to_hardware: bool = True,
+) -> dict:
+    """Interruptor por flanco: 1ª pulsación ON, 2ª OFF (sin soltar = mantener estado)."""
+    phy_in = bool(settings.panel_rules_triggers_use_physical_inputs)
+    runtime = rules_runtime.setdefault(
+        rule_key,
+        {
+            "last_trigger_active": False,
+            "last_executed_at": None,
+            "pulse_until": None,
+            "last_follow_on": False,
+        },
+    )
+    runtime.setdefault("pulse_until", None)
+    runtime.setdefault("last_follow_on", False)
+    trigger_code = rule.get("trigger", "IN_01_01")
+    trigger_active = _read_input_effective(
+        trigger_code,
+        use_hardware_if_no_override=use_hardware_if_no_override,
+        use_overrides=use_overrides,
+        physical_inputs=phy_in,
+    )
+    blocked_active_codes = [
+        code
+        for code in rule.get("blocked_if_active", [])
+        if _blocked_signal_active(
+            code,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            physical_inputs=phy_in,
+        )
+    ]
+    if runtime.pop("suppress_auto_rising", False):
+        runtime["last_trigger_active"] = trigger_active
+        return {
+            "executed": False,
+            "reason": "Flanco ignorado tras acción en panel",
+            "trigger_input_active": trigger_active,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    rising_edge = trigger_active and not runtime["last_trigger_active"]
+    runtime["last_trigger_active"] = trigger_active
+    if not rising_edge:
+        return {
+            "executed": False,
+            "reason": "Sin flanco de subida en interruptor",
+            "trigger_input_active": trigger_active,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    if blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
+        add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        return {
+            "executed": False,
+            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "toggle_active": rule_key in active_toggle_rules,
+        }
+    if rule_key in active_toggle_rules:
+        return _apply_toggle_enclavamiento_off(
+            rule_key,
+            rule,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+            blocked_active_codes=blocked_active_codes,
+        )
+    return _apply_toggle_enclavamiento_on(
+        rule_key,
+        rule,
+        trigger_code,
+        apply_outputs_to_hardware=apply_outputs_to_hardware,
+        blocked_active_codes=blocked_active_codes,
+    )
 
 
 def _apply_enclavamiento_mode_activation(
@@ -1715,6 +1896,14 @@ def _evaluate_trigger_rule(
             apply_outputs_to_hardware=apply_outputs_to_hardware,
             physical_inputs=phy_in,
         )
+    if _is_toggle_enclavamiento_rule(rule_key, rule) and not manual:
+        return _evaluate_toggle_enclavamiento_rule(
+            rule_key,
+            rule,
+            use_hardware_if_no_override=use_hardware_if_no_override,
+            use_overrides=use_overrides,
+            apply_outputs_to_hardware=apply_outputs_to_hardware,
+        )
     if rule_key not in rules_runtime:
         rules_runtime[rule_key] = {
             "last_trigger_active": False,
@@ -1758,30 +1947,14 @@ def _evaluate_trigger_rule(
         return {"executed": False, "reason": f"No se ejecuta: {trigger_code} no está activa", "trigger_input_active": False}
 
     if blocked_active_codes:
+        _clear_trigger_input_override(trigger_code)
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
         return {
             "executed": False,
             "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
             "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
         }
-
-    if _is_toggle_enclavamiento_rule(rule_key, rule):
-        if rule_key in active_toggle_rules:
-            return _apply_toggle_enclavamiento_off(
-                rule_key,
-                rule,
-                apply_outputs_to_hardware=apply_outputs_to_hardware,
-                blocked_active_codes=blocked_active_codes,
-            )
-        by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
-        return _apply_toggle_enclavamiento_on(
-            rule_key,
-            rule,
-            trigger_code,
-            activated_by_panel_override=by_panel,
-            apply_outputs_to_hardware=apply_outputs_to_hardware,
-            blocked_active_codes=blocked_active_codes,
-        )
 
     by_panel = _trigger_activated_by_panel_override(trigger_code, manual=manual)
     _apply_enclavamiento_mode_activation(
@@ -1949,6 +2122,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     deactivated = 0
     errors = 0
     error_messages: List[str] = []
+    blocked_rules: List[dict] = []
     for board_id in _module_ids():
         if board_id in io_state and io_state[board_id]["connected"]:
             with _board_modbus_lock(board_id):
@@ -1974,6 +2148,14 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             )
             if result.get("executed"):
                 executed += 1
+            elif result.get("blocked_inputs"):
+                blocked_rules.append(
+                    {
+                        "rule_key": rk,
+                        "blocked_inputs": list(result.get("blocked_inputs") or []),
+                        "reason": result.get("reason"),
+                    }
+                )
             if deactivate_on_fall and _deactivate_rule_on_fall(
                 rk,
                 use_hardware_if_no_override=False,
@@ -1992,6 +2174,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
         "pending_temp_restores": pending_restores,
         "errors": errors,
         "error_messages": error_messages[:10],
+        "blocked_rules": blocked_rules[:20],
         "timestamp": datetime.now().isoformat(),
     }
     background_auto_rules_last_run_at = result["timestamp"]
@@ -2105,7 +2288,6 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
                 rule_key,
                 rule,
                 trigger_code,
-                activated_by_panel_override=True,
                 apply_outputs_to_hardware=apply_outputs_to_hardware,
                 blocked_active_codes=blocked_active_codes,
             )
@@ -2686,6 +2868,22 @@ def set_input_override(action: InputOverrideAction):
     if not 1 <= action.channel <= len(ins):
         raise HTTPException(status_code=400, detail=f"Canal debe estar entre 1 y {len(ins)}")
     idx = action.channel - 1
+    denial = _override_request_blocked(action.board_id, action.channel, action.state)
+    if denial:
+        input_overrides[action.board_id][idx] = None
+        _persist_overrides_to_db()
+        for hit in denial.get("blocked_rules") or []:
+            rk = hit.get("rule_key", "regla")
+            ins = ", ".join(hit.get("blocked_inputs") or [])
+            add_event("WARN", f"Override IN{action.channel:02d} denegado: {rk} bloqueado por {ins}", action.board_id)
+        return {
+            "board_id": action.board_id,
+            "channel": action.channel,
+            "override": None,
+            "denied": True,
+            "blocked_rules": denial.get("blocked_rules"),
+            "active_toggle_rules": sorted(active_toggle_rules),
+        }
     input_overrides[action.board_id][idx] = action.state
     _persist_overrides_to_db()
     add_event("INFO", f"Override IN{action.channel:02d} = {action.state}", action.board_id)
@@ -2697,14 +2895,21 @@ def set_input_override(action: InputOverrideAction):
             "override": action.state,
         },
     )
+    auto_rules: Optional[dict] = None
     if settings.auto_rules_background_enabled:
         try:
-            background_auto_rules_cycle(
+            auto_rules = background_auto_rules_cycle(
                 deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
             )
         except Exception:  # noqa: BLE001
             pass
-    return {"board_id": action.board_id, "channel": action.channel, "override": action.state}
+    return {
+        "board_id": action.board_id,
+        "channel": action.channel,
+        "override": action.state,
+        "auto_rules": auto_rules,
+        "active_toggle_rules": sorted(active_toggle_rules),
+    }
 
 
 @router.delete("/inputs/override")
@@ -2722,14 +2927,21 @@ def clear_input_override(board_id: int, channel: int):
         "input_override",
         {"board_id": board_id, "channel": channel, "override": None},
     )
+    auto_rules: Optional[dict] = None
     if settings.auto_rules_background_enabled:
         try:
-            background_auto_rules_cycle(
+            auto_rules = background_auto_rules_cycle(
                 deactivate_on_fall=bool(settings.auto_rules_deactivate_on_fall)
             )
         except Exception:  # noqa: BLE001
             pass
-    return {"board_id": board_id, "channel": channel, "override": None}
+    return {
+        "board_id": board_id,
+        "channel": channel,
+        "override": None,
+        "auto_rules": auto_rules,
+        "active_toggle_rules": sorted(active_toggle_rules),
+    }
 
 
 @router.get("/rules/state")

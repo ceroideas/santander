@@ -76,6 +76,19 @@ function isToggleEnclavamiento(ruleKey, rule) {
   if (ruleKey === "senal_de_incendio_activada") return false;
   return true;
 }
+
+function applyAutoRulesPanelFeedback(res, addUI, setActiveToggleRules) {
+  if (Array.isArray(res?.active_toggle_rules) && setActiveToggleRules) {
+    setActiveToggleRules(res.active_toggle_rules);
+  }
+  const blocked = res?.auto_rules?.blocked_rules;
+  if (!Array.isArray(blocked)) return;
+  for (const b of blocked) {
+    const ins = (b.blocked_inputs || []).join(", ");
+    const rk = b.rule_key || "regla";
+    addUI("WARN", `${rk} bloqueado por ${ins}`);
+  }
+}
 /** Unit ID Modbus 0-255; no usar `n || 1` (0 válido; NaN no debe volverse 1). */
 function normalizeSlaveId(raw, fallback = 1) {
   const s = parseInt(String(raw).trim(), 10);
@@ -2165,28 +2178,50 @@ export default function ETD8A12Panel() {
     const current = boards[boardId].input_overrides?.[idx];
     const next = current === null ? true : current === true ? false : null;
     try {
+      let res;
       if (next === null) {
-        await apiFetch(
+        res = await apiFetch(
           `/inputs/override?board_id=${boardId}&channel=${channel}`,
           { method: "DELETE" },
         );
         addUI("INFO", `Override IN${channel} en P${boardId}: REAL`);
       } else {
-        await apiFetch("/inputs/override", {
+        res = await apiFetch("/inputs/override", {
           method: "POST",
           body: JSON.stringify({ board_id: boardId, channel, state: next }),
         });
-        addUI(
-          "INFO",
-          `Override IN${channel} en P${boardId}: ${next ? "FORZADA ON" : "FORZADA OFF"}`,
-        );
+        const blocked = Array.isArray(res?.auto_rules?.blocked_rules)
+          && res.auto_rules.blocked_rules.length > 0;
+        if (res?.denied || blocked) {
+          const detail = (res?.blocked_rules || [])
+            .map((b) => `${b.rule_key}: ${(b.blocked_inputs || []).join(", ")}`)
+            .join("; ");
+          addUI(
+            "WARN",
+            detail
+              ? `IN${channel} P${boardId}: bloqueado — ${detail} (override REAL)`
+              : `IN${channel} P${boardId}: bloqueado (override revertido a REAL)`,
+          );
+        } else {
+          addUI(
+            "INFO",
+            `Override IN${channel} en P${boardId}: ${next ? "FORZADA ON" : "FORZADA OFF"}`,
+          );
+        }
       }
+      applyAutoRulesPanelFeedback(res, addUI, setActiveToggleRules);
       setBoards((prev) => {
         const b = prev[boardId];
         if (!b) return prev;
         const ov = [...(b.input_overrides || [])];
         while (ov.length < channel) ov.push(null);
-        ov[idx] = next;
+        const effective =
+          res?.denied === true
+            ? null
+            : res?.override !== undefined
+              ? res.override
+              : next;
+        ov[idx] = effective;
         return { ...prev, [boardId]: { ...b, input_overrides: ov } };
       });
       void afterPanelMutation();
@@ -2225,11 +2260,19 @@ export default function ETD8A12Panel() {
             addUI("OK", `Modo ejecutado: ${toModeLabel(ruleKey)}`);
             if (ruleKey.startsWith("horario_")) setSelectedMode(ruleKey);
           }
+          applyAutoRulesPanelFeedback(result, addUI, setActiveToggleRules);
           void afterPanelMutation();
           return;
         }
+        applyAutoRulesPanelFeedback(result, addUI, setActiveToggleRules);
         const reason = result?.reason || "Regla bloqueada o no ejecutada";
-        addUI("WARN", `No se pudo ejecutar ${toModeLabel(ruleKey)}: ${reason}`);
+        const blocked = (result?.blocked_inputs || []).join(", ");
+        addUI(
+          "WARN",
+          blocked
+            ? `${toModeLabel(ruleKey)}: ${reason}`
+            : `No se pudo ejecutar ${toModeLabel(ruleKey)}: ${reason}`,
+        );
       } catch (e) {
         addUI("ERR", `Error ejecutando modo ${ruleKey}: ${e.message}`);
       }
