@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # Evaluación automática de reglas en background (independiente del dashboard)
     auto_rules_background_enabled: bool = True
     # Intervalo entre ciclos completos (lectura placas + reglas); mayor = menos tráfico Modbus.
-    auto_rules_background_interval_seconds: int = 2
+    auto_rules_background_interval_seconds: float = 0.5
     # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
     auto_rules_deactivate_on_fall: bool = True
 
