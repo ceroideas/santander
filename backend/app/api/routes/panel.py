@@ -128,6 +128,26 @@ def _rule_is_emergency_operational(rule_key: str) -> bool:
     return rule_key in EMERGENCY_MODE_RULE_KEYS
 
 
+def _is_radares_esclusa_rule(rule_key: str) -> bool:
+    return rule_key.startswith("radares_") and rule_key.endswith("_esclusa")
+
+
+def _is_radares_automatico_rule(rule_key: str) -> bool:
+    return rule_key.startswith("radares_") and not rule_key.endswith("_esclusa")
+
+
+def _rule_participates_in_auto_cycle(rule_key: str, rule: Optional[dict] = None) -> bool:
+    """
+    Radares «normales» y «_esclusa» comparten el mismo IN físico: solo evalúa la variante
+    coherente con `current_mode` (automático vs esclusa).
+    """
+    if _is_radares_esclusa_rule(rule_key):
+        return current_mode == "horario_esclusa"
+    if _is_radares_automatico_rule(rule_key):
+        return current_mode != "horario_esclusa"
+    return True
+
+
 def _is_toggle_enclavamiento_rule(rule_key: str, rule: Optional[dict] = None) -> bool:
     """
     Enclavamiento tipo interruptor: ON/OFF al pulsar (lateral o IN), sin mantener apretado.
@@ -1582,6 +1602,8 @@ def _override_request_blocked(board_id: int, channel: int, state: Optional[bool]
             continue
         if rule.get("trigger") != code:
             continue
+        if not _rule_participates_in_auto_cycle(rk, rule):
+            continue
         blocked = _blocked_inputs_for_rule(rule)
         if blocked:
             hits.append(
@@ -1887,6 +1909,13 @@ def _evaluate_trigger_rule(
     rule = rules_config.get(rule_key)
     if not rule:
         return {"executed": False, "reason": f"Regla no encontrada: {rule_key}"}
+    if not manual and not _rule_participates_in_auto_cycle(rule_key, rule):
+        return {
+            "executed": False,
+            "reason": "Regla no aplica al modo operativo actual",
+            "current_mode": current_mode,
+            "rule_key": rule_key,
+        }
     if rule.get("type") == PULSE_5_SG_TYPE:
         return _evaluate_pulse_5_sg_rule(
             rule_key,
@@ -2028,6 +2057,8 @@ def _evaluate_auto_rules(*, use_hardware_if_no_override: bool = True) -> None:
             continue
         if rule.get("type") not in AUTO_RULE_TYPES:
             continue
+        if not _rule_participates_in_auto_cycle(rk, rule):
+            continue
         try:
             _evaluate_trigger_rule(
                 rk,
@@ -2136,6 +2167,8 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
         if not rule.get("auto_execute", True):
             continue
         if rule.get("type") not in AUTO_RULE_TYPES:
+            continue
+        if not _rule_participates_in_auto_cycle(rk, rule):
             continue
         checked += 1
         try:

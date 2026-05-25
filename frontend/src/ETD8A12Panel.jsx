@@ -1969,20 +1969,19 @@ export default function ETD8A12Panel() {
     }
   }, [rulesJson]);
 
+  const loadHistoricoEvents = useCallback(async () => {
+    try {
+      const d = await apiFetch("/events?limit=500");
+      setEvents(d.events || []);
+    } catch {
+      // silent
+    }
+  }, []);
+
   useEffect(() => {
-    if (!serverOnline || tab !== HISTORICO_TAB_INDEX) return;
-    const pollEvents = async () => {
-      try {
-        const d = await apiFetch("/events?limit=500");
-        setEvents(d.events || []);
-      } catch {
-        // silent
-      }
-    };
-    pollEvents();
-    const iv = setInterval(pollEvents, 3000);
-    return () => clearInterval(iv);
-  }, [serverOnline, tab]);
+    if (tab !== HISTORICO_TAB_INDEX) return;
+    void loadHistoricoEvents();
+  }, [tab, loadHistoricoEvents]);
 
   // Actividad (chat): al cargar y en cada línea nueva, scroll al final del panel.
   useEffect(() => {
@@ -2489,7 +2488,7 @@ export default function ETD8A12Panel() {
 
   const filtered =
     histFilter === "ALL" ? events : events.filter((e) => e.type === histFilter);
-  // Histórico: más reciente arriba; al abrir pestaña o nuevos eventos, scroll al inicio de la lista.
+  // Histórico: más reciente arriba; al abrir la pestaña (carga única), scroll al inicio de la lista.
   useEffect(() => {
     if (tab !== HISTORICO_TAB_INDEX || filtered.length === 0) return;
     const tabOpened = prevTabRef.current !== HISTORICO_TAB_INDEX;
