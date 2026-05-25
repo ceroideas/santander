@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     setup_token: Optional[str] = None
 
     cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
+    # true = acepta cualquier Origin (solo dev / redes variables tipo ZeroTier). No usar en producción.
+    cors_allow_all: bool = False
 
     # WebSocket ingest sucursal → COCE (API key por sucursal)
     branch_auth_required: bool = True

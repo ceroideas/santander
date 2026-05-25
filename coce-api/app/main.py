@@ -31,13 +31,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origin_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_kw: dict = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if settings.cors_allow_all:
+    _cors_kw["allow_origin_regex"] = r"https?://.*"
+else:
+    _cors_kw["allow_origins"] = settings.cors_origin_list
+app.add_middleware(CORSMiddleware, **_cors_kw)
 
 prefix = settings.api_prefix
 app.include_router(auth.router, prefix=prefix)
