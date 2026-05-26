@@ -52,7 +52,7 @@ async def _events_retention_loop() -> None:
 
 
 async def _auto_rules_background_loop() -> None:
-    interval_s = max(1, int(settings.auto_rules_background_interval_seconds))
+    interval_s = max(0.15, float(settings.auto_rules_background_interval_seconds))
     while True:
         await asyncio.sleep(interval_s)
         try:

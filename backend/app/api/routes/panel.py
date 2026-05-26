@@ -2321,7 +2321,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
 def get_background_auto_rules_state():
     return {
         "enabled": bool(settings.auto_rules_background_enabled),
-        "interval_seconds": int(settings.auto_rules_background_interval_seconds),
+        "interval_seconds": float(settings.auto_rules_background_interval_seconds),
         "deactivate_on_fall": bool(settings.auto_rules_deactivate_on_fall),
         "last_run_at": background_auto_rules_last_run_at,
         "last_result": background_auto_rules_last_result,
