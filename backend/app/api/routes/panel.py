@@ -78,11 +78,11 @@ def _io_tuple(board_id: int) -> tuple[tuple[bool, ...], tuple[bool, ...], tuple[
     )
 
 
-def _publish_panel_status_debounced() -> None:
+def _publish_panel_status_debounced(*, force: bool = False) -> None:
     """Estado panel en RAM → COCE (WS) y dashboard local (WS)."""
     global _coce_status_last_emit
     now = time.time()
-    if now - _coce_status_last_emit < _COCE_STATUS_MIN_INTERVAL_S:
+    if not force and now - _coce_status_last_emit < _COCE_STATUS_MIN_INTERVAL_S:
         return
     _coce_status_last_emit = now
     payload = _build_status_payload()
@@ -1271,6 +1271,9 @@ def _restore_temp_deactivate_outputs(
             f"Restauradas salidas (estaban ON antes de la regla): {', '.join(restored)}",
             1,
         )
+        # Escritura Modbus actualiza io_state sin pasar por _read_all_io; el siguiente
+        # poll no ve delta y el dashboard no recibe panel_status hasta refrescar.
+        _publish_panel_status_debounced(force=True)
     return restored
 
 

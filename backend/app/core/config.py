@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # Evaluación automática de reglas en background (independiente del dashboard)
     auto_rules_background_enabled: bool = True
     # Intervalo entre ciclos completos (lectura placas + reglas); mayor = menos tráfico Modbus.
-    auto_rules_background_interval_seconds: float = 0.5
+    auto_rules_background_interval_seconds: float = 3.0
     # Si está activo, al bajar el trigger de la regla actual se desactiva ese modo.
     auto_rules_deactivate_on_fall: bool = True
 
@@ -94,7 +94,7 @@ class Settings(BaseSettings):
     panel_rules_triggers_use_physical_inputs: bool = True
 
     # Segundos de espera antes de volver a ON los bulones tras `deactivate_outputs_temporary` (0 = al instante).
-    panel_temp_deactivate_restore_delay_seconds: int = 3
+    panel_temp_deactivate_restore_delay_seconds: int = 5
 
     # Producción: servir build del frontend desde FastAPI (ruta a frontend/dist o backend/static)
     # Por defecto: carpeta hermana frontend/dist (repo con backend/ y frontend/).
