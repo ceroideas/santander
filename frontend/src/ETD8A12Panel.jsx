@@ -81,6 +81,8 @@ function applyAutoRulesPanelFeedback(res, addUI, setActiveToggleRules) {
   const blocked = res?.auto_rules?.blocked_rules;
   if (!Array.isArray(blocked)) return;
   for (const b of blocked) {
+    const reason = String(b.reason || "");
+    if (!reason.includes("Bloqueado")) continue;
     const ins = (b.blocked_inputs || []).join(", ");
     const rk = b.rule_key || "regla";
     addUI("WARN", `${rk} bloqueado por ${ins}`);
@@ -2343,10 +2345,7 @@ export default function ETD8A12Panel() {
           method: "POST",
           body: JSON.stringify({ board_id: boardId, channel, state: next }),
         });
-        const blocked =
-          Array.isArray(res?.auto_rules?.blocked_rules) &&
-          res.auto_rules.blocked_rules.length > 0;
-        if (res?.denied || blocked) {
+        if (res?.denied) {
           const detail = (res?.blocked_rules || [])
             .map((b) => `${b.rule_key}: ${(b.blocked_inputs || []).join(", ")}`)
             .join("; ");

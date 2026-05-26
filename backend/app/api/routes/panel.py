@@ -1555,7 +1555,17 @@ def _evaluate_pulse_5_sg_rule(
 
     if rising and blocked_active_codes:
         _clear_trigger_input_override(trigger_code)
+        runtime["last_trigger_active"] = trigger_active
         add_event("WARN", f"{rule_key} bloqueado por {', '.join(blocked_active_codes)}", 1)
+        return {
+            "executed": False,
+            "reason": f"Bloqueado por entradas activas: {', '.join(blocked_active_codes)}",
+            "trigger_input_active": trigger_active,
+            "blocked_inputs": blocked_active_codes,
+            "follow_on": False,
+            "pulse_seconds": 0,
+            "follow_mode": True,
+        }
 
     if manual:
         if blocked_active_codes:
@@ -1633,7 +1643,6 @@ def _evaluate_pulse_5_sg_rule(
         "executed": False,
         "reason": "Sin cambio de nivel",
         "trigger_input_active": trigger_active,
-        "blocked_inputs": blocked_active_codes,
         "follow_on": desired,
         "pulse_seconds": 0,
         "follow_mode": True,
@@ -2267,7 +2276,9 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             )
             if result.get("executed"):
                 executed += 1
-            elif result.get("blocked_inputs"):
+            elif result.get("blocked_inputs") and "Bloqueado" in (
+                result.get("reason") or ""
+            ):
                 blocked_rules.append(
                     {
                         "rule_key": rk,
