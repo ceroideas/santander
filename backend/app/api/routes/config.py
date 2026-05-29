@@ -1,8 +1,20 @@
 """GET/PUT /api/config/* — horarios, festivos, tiempos, boards (IPs ETD8A12)."""
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Body
 from app.hardware.modbus_client import get_boards_config_placeholder, test_board_ports
+from app.db.template_store import get_template_config, set_template_config
 
 router = APIRouter(prefix="/config")
+
+
+@router.get("/template", summary="Obtener configuración de la plantilla")
+def get_template():
+    return get_template_config()
+
+
+@router.put("/template", summary="Actualizar configuración de la plantilla")
+def put_template(config: dict = Body(...)):
+    set_template_config(config)
+    return {"ok": True}
 
 
 @router.get("/schedules", summary="Configuración de horarios")

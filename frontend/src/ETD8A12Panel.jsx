@@ -14,7 +14,9 @@ import {
   faCubes,
   faFileImport,
   faFileLines,
+  faFloppyDisk,
   faLock,
+  faRotateLeft,
   faPenToSquare,
   faPowerOff,
   faSliders,
@@ -24,10 +26,10 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 const C = {
-  red: "#EC0000",
-  redDark: "#B50000",
-  redFaint: "#FFF0F0",
-  redBorder: "#FFBCBC",
+  red: "var(--template-primary)",
+  redDark: "var(--template-primary-dark)",
+  redFaint: "var(--template-primary-faint)",
+  redBorder: "var(--template-primary-border)",
   white: "#FFFFFF",
   offWhite: "#FAFAFA",
   surface: "#F5F5F5",
@@ -50,9 +52,9 @@ const C = {
 };
 
 export const colors = {
-  brand: "#E50914",
-  brandDark: "#B20710",
-  brandLight: "#FDE8E8",
+  brand: "var(--template-primary)",
+  brandDark: "var(--template-primary-dark)",
+  brandLight: "var(--template-primary-faint)",
   bg: "#F5F5F5",
   white: "#FFFFFF",
   border: "#E0E0E0",
@@ -65,6 +67,11 @@ export const colors = {
 
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
+const DEFAULT_TEMPLATE_CONFIG = {
+  mainLogo: "/assets/logo.png",
+  boardLogo: "/assets/santander-logo.png",
+  primaryColor: "#E50914",
+};
 
 /** Enclavamientos interruptor (verde, cierres, apertura remota COCE…), no horarios ni incendio. */
 function isToggleEnclavamiento(ruleKey, rule) {
@@ -100,8 +107,70 @@ const TABS = [
   "Configuración",
   "Definición placas",
   "Configuración pulsadores",
+  "Configuración template",
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
+
+function normalizeHexColor(
+  raw,
+  fallback = DEFAULT_TEMPLATE_CONFIG.primaryColor,
+) {
+  const value = String(raw || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value;
+  return fallback;
+}
+
+function hexToRgb(hex) {
+  const normalized = normalizeHexColor(hex).slice(1);
+  return {
+    r: parseInt(normalized.slice(0, 2), 16),
+    g: parseInt(normalized.slice(2, 4), 16),
+    b: parseInt(normalized.slice(4, 6), 16),
+  };
+}
+
+function mixHex(hex, target, amount) {
+  const a = hexToRgb(hex);
+  const b = hexToRgb(target);
+  const mix = (x, y) => Math.round(x + (y - x) * amount);
+  return `#${[mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b)]
+    .map((n) => n.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
+function templateColors(config) {
+  const primary = normalizeHexColor(config.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor);
+  return {
+    primary,
+    primaryDark: mixHex(primary, "#000000", 0.25),
+    primaryFaint: mixHex(primary, "#ffffff", 0.9),
+    primaryBorder: mixHex(primary, "#ffffff", 0.65),
+  };
+}
+
+function readImageAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("El archivo debe ser una imagen"));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function displayLogoValue(value, fallback) {
+  if (!value) return fallback;
+  if (String(value).startsWith("data:image/"))
+    return "Imagen subida localmente";
+  return value;
+}
 
 const IN_PLACEHOLDERS = Array.from(
   { length: 12 },
@@ -146,7 +215,7 @@ const SecLabel = ({ children }) => (
       textTransform: "uppercase",
       marginBottom: 12,
       borderBottom: `2px solid ${C.border}`,
-      background: "linear-gradient(90deg, #E50914 0%, #B20710 100%)",
+      background: `linear-gradient(90deg, ${C.red} 0%, ${C.redDark} 100%)`,
       WebkitBackgroundClip: "text",
       WebkitTextFillColor: "transparent",
       backgroundClip: "text",
@@ -192,11 +261,16 @@ const Btn = ({
       disabled={disabled}
       style={{
         ...s,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
         fontFamily: "inherit",
-        fontSize: small ? 11 : 12,
+        fontSize: small ? 11 : 13,
         fontWeight: 600,
-        padding: small ? "4px 10px" : "7px 16px",
-        borderRadius: 6,
+        padding: small ? "4px 10px" : "9px 16px",
+        borderRadius: 8,
+        boxShadow: variant === "primary" ? "0 1px 3px rgba(0,0,0,0.12)" : undefined,
         opacity: disabled ? 0.5 : 1,
         cursor: disabled ? "not-allowed" : "pointer",
         width: full ? "100%" : undefined,
@@ -206,6 +280,306 @@ const Btn = ({
     </button>
   );
 };
+
+function ImageFilePicker({ onSelect, label = "Seleccionar imagen" }) {
+  const inputRef = useRef(null);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        aria-hidden
+        tabIndex={-1}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onSelect(file);
+          e.target.value = "";
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          fontFamily: "inherit",
+          fontSize: 13,
+          fontWeight: 600,
+          padding: "9px 16px",
+          borderRadius: 8,
+          cursor: "pointer",
+          background: C.red,
+          color: C.white,
+          border: `1px solid ${C.redDark}`,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+        }}
+      >
+        <FontAwesomeIcon icon={faFileImport} aria-hidden />
+        {label}
+      </button>
+    </div>
+  );
+}
+
+function TemplateConfigPanel({
+  draft,
+  colors: themeColors,
+  onChange,
+  onUploadMainLogo,
+  onUploadBoardLogo,
+  onSave,
+  onReset,
+}) {
+  const fieldStyle = {
+    width: "100%",
+    padding: "8px 10px",
+    border: `1px solid ${C.border}`,
+    borderRadius: 8,
+    fontSize: 13,
+  };
+  const labelStyle = {
+    fontSize: 11,
+    color: C.muted,
+    marginBottom: 5,
+    fontWeight: 600,
+  };
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(320px, 0.95fr) minmax(360px, 1.05fr)",
+        gap: 12,
+        alignItems: "start",
+      }}
+    >
+      <Card>
+        <SecLabel>Configuración de template</SecLabel>
+        <div style={{ display: "grid", gap: 14 }}>
+          <div>
+            <div style={labelStyle}>Logo principal (ruta en assets)</div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 12,
+                padding: 16,
+                border: `1px solid ${C.border}`,
+                borderRadius: 12,
+                background: C.white,
+                boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                marginBottom: 12,
+              }}
+            >
+              <div
+                style={{
+                  width: "40%",
+                  height: 180,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: C.surfaceAlt,
+                  borderRadius: 8,
+                  border: `1px dashed ${C.borderMid}`,
+                }}
+              >
+                <img
+                  src={draft.mainLogo || DEFAULT_TEMPLATE_CONFIG.mainLogo}
+                  alt="Vista previa logo principal"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "100%",
+                    objectFit: "contain",
+                  }}
+                  onError={(e) => {
+                    e.currentTarget.src = DEFAULT_TEMPLATE_CONFIG.mainLogo;
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 12, color: C.textSub, fontWeight: 600 }}>
+                {displayLogoValue(
+                  draft.mainLogo,
+                  DEFAULT_TEMPLATE_CONFIG.mainLogo,
+                )}
+              </div>
+            </div>
+            <input
+              value={
+                String(draft.mainLogo || "").startsWith("data:image/")
+                  ? ""
+                  : draft.mainLogo
+              }
+              onChange={(e) => onChange({ mainLogo: e.target.value })}
+              placeholder="/assets/logo.png"
+              style={fieldStyle}
+            />
+            <ImageFilePicker
+              label="Seleccionar imagen"
+              onSelect={onUploadMainLogo}
+            />
+            <div style={{ fontSize: 11, color: C.muted, marginTop: 5 }}>
+              Guarda el archivo en <code>frontend/public/assets</code> y usa una
+              ruta como <code>/assets/logo-cliente.png</code>, o súbelo desde
+              este campo para guardarlo localmente.
+            </div>
+          </div>
+
+          <div>
+            <div style={labelStyle}>Logo pequeño de placas</div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: 10,
+                border: `1px solid ${C.border}`,
+                borderRadius: 10,
+                background: C.offWhite,
+                marginBottom: 8,
+              }}
+            >
+              <img
+                src={draft.boardLogo || DEFAULT_TEMPLATE_CONFIG.boardLogo}
+                alt="Vista previa logo placa"
+                style={{ width: 80, height: 80, objectFit: "contain" }}
+                onError={(e) => {
+                  e.currentTarget.src = DEFAULT_TEMPLATE_CONFIG.boardLogo;
+                }}
+              />
+              <span style={{ fontSize: 12, color: C.textSub }}>
+                {displayLogoValue(
+                  draft.boardLogo,
+                  DEFAULT_TEMPLATE_CONFIG.boardLogo,
+                )}
+              </span>
+            </div>
+            <input
+              value={
+                String(draft.boardLogo || "").startsWith("data:image/")
+                  ? ""
+                  : draft.boardLogo
+              }
+              onChange={(e) => onChange({ boardLogo: e.target.value })}
+              placeholder="/assets/santander-logo.png"
+              style={fieldStyle}
+            />
+            <ImageFilePicker
+              label="Seleccionar imagen"
+              onSelect={onUploadBoardLogo}
+            />
+          </div>
+
+          <div>
+            <div style={labelStyle}>Color principal</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type="color"
+                value={normalizeHexColor(draft.primaryColor)}
+                onChange={(e) => onChange({ primaryColor: e.target.value })}
+                style={{
+                  width: 54,
+                  height: 38,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 8,
+                  padding: 2,
+                  background: C.white,
+                }}
+              />
+              <input
+                value={draft.primaryColor}
+                onChange={(e) => onChange({ primaryColor: e.target.value })}
+                placeholder="#E50914"
+                style={fieldStyle}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn variant="primary" onClick={onSave}>
+              <FontAwesomeIcon icon={faFloppyDisk} aria-hidden />
+              Guardar template
+            </Btn>
+            <Btn onClick={onReset}>
+              <FontAwesomeIcon icon={faRotateLeft} aria-hidden />
+              Restaurar por defecto
+            </Btn>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <SecLabel>Vista previa</SecLabel>
+        <div
+          style={{
+            border: `1px solid ${C.border}`,
+            borderRadius: 14,
+            overflow: "hidden",
+            background: C.white,
+          }}
+        >
+            <div
+              style={{
+                minHeight: 58,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                padding: "10px 16px",
+                color: C.white,
+                background: `linear-gradient(90deg, ${themeColors.primary} 0%, ${themeColors.primaryDark} 100%)`,
+              }}
+            >
+            <img
+              src={draft.mainLogo || DEFAULT_TEMPLATE_CONFIG.mainLogo}
+              alt="Logo principal"
+              style={{ width: 120, height: 36, objectFit: "contain" }}
+              onError={(e) => {
+                e.currentTarget.src = DEFAULT_TEMPLATE_CONFIG.mainLogo;
+              }}
+            />
+            <span style={{ fontWeight: 700 }}>Control de Accesos</span>
+          </div>
+
+          <div style={{ padding: 16 }}>
+            <div
+              style={{
+                border: `1px solid ${C.border}`,
+                borderLeft: `4px solid ${themeColors.primary}`,
+                borderRadius: 10,
+                padding: 12,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <img
+                src={draft.boardLogo || DEFAULT_TEMPLATE_CONFIG.boardLogo}
+                alt="Logo placa"
+                style={{ width: 28, height: 28, objectFit: "contain" }}
+                onError={(e) => {
+                  e.currentTarget.src = DEFAULT_TEMPLATE_CONFIG.boardLogo;
+                }}
+              />
+              <div>
+                <div style={{ fontWeight: 700, color: C.textMid }}>
+                  Placa 1 - Central
+                </div>
+                <div style={{ color: C.muted, fontSize: 12 }}>
+                  Ejemplo de tarjeta de placa
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
 
 async function apiFetch(path, opts = {}) {
   const { timeoutMs, ...fetchOpts } = opts;
@@ -224,7 +598,8 @@ async function apiFetch(path, opts = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
   try {
-    const res = await fetch(`${API}${path}`, {
+    const url = path.startsWith("/api") ? path : `${API}${path}`;
+    const res = await fetch(url, {
       ...fetchOpts,
       headers,
       ...(useTimeout ? { signal: controller.signal } : {}),
@@ -1687,6 +2062,24 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
 
 export default function ETD8A12Panel() {
   const [tab, setTab] = useState(0);
+  const [templateConfig, setTemplateConfig] = useState(DEFAULT_TEMPLATE_CONFIG);
+  const [templateDraft, setTemplateDraft] = useState(DEFAULT_TEMPLATE_CONFIG);
+
+  useEffect(() => {
+    apiFetch("/api/config/template")
+      .then((data) => {
+        if (data && Object.keys(data).length > 0) {
+          const parsed = {
+            ...DEFAULT_TEMPLATE_CONFIG,
+            ...data,
+            primaryColor: normalizeHexColor(data.primaryColor || DEFAULT_TEMPLATE_CONFIG.primaryColor)
+          };
+          setTemplateConfig(parsed);
+          setTemplateDraft(parsed);
+        }
+      })
+      .catch((err) => console.warn("Error cargando template", err));
+  }, []);
   const [serverOnline, setServer] = useState(false);
   const [boards, setBoards] = useState({});
   const [boardConfigs, setConfigs] = useState({});
@@ -1757,6 +2150,10 @@ export default function ETD8A12Panel() {
   const statusPollInFlightRef = useRef(false);
   const mergeStatusRef = useRef(null);
   const panelWsRef = useRef(null);
+  const activeTemplateColors = useMemo(
+    () => templateColors(templateConfig),
+    [templateConfig],
+  );
   const rulesMapRef = useRef(rulesMap);
   rulesMapRef.current = rulesMap;
   const boardsRef = useRef(boards);
@@ -1824,6 +2221,59 @@ export default function ETD8A12Panel() {
     },
     [beginGlobalLoading, endGlobalLoading],
   );
+
+  const updateTemplateDraft = useCallback((patch) => {
+    setTemplateDraft((prev) => ({ ...prev, ...patch }));
+  }, []);
+
+  const uploadTemplateLogo = useCallback(
+    async (file, key) => {
+      if (!file) return;
+      try {
+        const dataUrl = await readImageAsDataUrl(file);
+        setTemplateDraft((prev) => ({ ...prev, [key]: dataUrl }));
+        addUI("INFO", "Logo cargado en la configuración local");
+      } catch (e) {
+        addUI("ERR", e.message);
+      }
+    },
+    [addUI],
+  );
+
+  const saveTemplateDraft = useCallback(async () => {
+    const next = {
+      mainLogo:
+        templateDraft.mainLogo?.trim() || DEFAULT_TEMPLATE_CONFIG.mainLogo,
+      boardLogo:
+        templateDraft.boardLogo?.trim() || DEFAULT_TEMPLATE_CONFIG.boardLogo,
+      primaryColor: normalizeHexColor(templateDraft.primaryColor),
+    };
+    try {
+      await apiFetch("/api/config/template", {
+        method: "PUT",
+        body: JSON.stringify(next)
+      });
+      setTemplateConfig(next);
+      setTemplateDraft(next);
+      addUI("OK", "Template guardado");
+    } catch (e) {
+      addUI("Error", "No se pudo guardar la plantilla: " + e.message);
+    }
+  }, [addUI, templateDraft]);
+
+  const resetTemplateConfig = useCallback(async () => {
+    try {
+      await apiFetch("/api/config/template", {
+        method: "PUT",
+        body: JSON.stringify(DEFAULT_TEMPLATE_CONFIG)
+      });
+      setTemplateConfig(DEFAULT_TEMPLATE_CONFIG);
+      setTemplateDraft(DEFAULT_TEMPLATE_CONFIG);
+      addUI("INFO", "Template restaurado por defecto");
+    } catch (e) {
+      addUI("Error", "No se pudo restaurar la plantilla: " + e.message);
+    }
+  }, [addUI]);
 
   const scrollContainerToBottom = useCallback(
     (containerRef, { smooth = true } = {}) => {
@@ -2688,6 +3138,10 @@ export default function ETD8A12Panel() {
   return (
     <div
       style={{
+        "--template-primary": activeTemplateColors.primary,
+        "--template-primary-dark": activeTemplateColors.primaryDark,
+        "--template-primary-faint": activeTemplateColors.primaryFaint,
+        "--template-primary-border": activeTemplateColors.primaryBorder,
         minHeight: "100vh",
         background: C.surface,
         fontFamily: "'Segoe UI',system-ui,sans-serif",
@@ -2701,6 +3155,9 @@ export default function ETD8A12Panel() {
         tabs={TABS}
         activeTab={tab}
         onTabChange={setTab}
+        logoSrc={templateConfig.mainLogo}
+        primaryColor={activeTemplateColors.primary}
+        primaryDarkColor={activeTemplateColors.primaryDark}
       />
       <div style={{ padding: "30px 12px" }}>
         {tab === 0 && (
@@ -2747,8 +3204,7 @@ export default function ETD8A12Panel() {
                   style={{
                     fontSize: 13,
                     fontWeight: 700,
-                    background:
-                      "linear-gradient(90deg, #E50914 0%, #B20710 100%)",
+                    background: `linear-gradient(90deg, ${C.red} 0%, ${C.redDark} 100%)`,
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
                     backgroundClip: "text",
@@ -2795,7 +3251,7 @@ export default function ETD8A12Panel() {
                                   : C.border
                           }`,
                           background: isModeActive
-                            ? "linear-gradient(90deg, #E50914 0%, #B20710 100%)"
+                            ? `linear-gradient(90deg, ${C.red} 0%, ${C.redDark} 100%)`
                             : isQueued
                               ? "#fff7ed"
                               : isToggleOn
@@ -2943,14 +3399,18 @@ export default function ETD8A12Panel() {
                         }}
                       >
                         <img
-                          src="/assets/santander-logo.png"
-                          alt="Santander"
+                          src={templateConfig.boardLogo}
+                          alt="Logo placa"
                           style={{
                             width: 22,
                             height: 22,
                             objectFit: "contain",
                             alignSelf: "flex-start",
                             marginTop: 1,
+                          }}
+                          onError={(e) => {
+                            e.currentTarget.src =
+                              DEFAULT_TEMPLATE_CONFIG.boardLogo;
                           }}
                         />
                         <div
@@ -4742,6 +5202,18 @@ export default function ETD8A12Panel() {
               ))}
             </div>
           </div>
+        )}
+
+        {tab === 6 && (
+          <TemplateConfigPanel
+            draft={templateDraft}
+            colors={templateColors(templateDraft)}
+            onChange={updateTemplateDraft}
+            onUploadMainLogo={(file) => uploadTemplateLogo(file, "mainLogo")}
+            onUploadBoardLogo={(file) => uploadTemplateLogo(file, "boardLogo")}
+            onSave={saveTemplateDraft}
+            onReset={resetTemplateConfig}
+          />
         )}
       </div>
       <style>{`*{box-sizing:border-box} ::-webkit-scrollbar{width:6px;height:6px} ::-webkit-scrollbar-thumb{background:${C.borderMid};border-radius:3px}`}</style>
