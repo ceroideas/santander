@@ -179,6 +179,17 @@ def _ensure_channel_name_column(conn: Any) -> None:
         conn.execute("ALTER TABLE panel_module_channels ADD COLUMN channel_name TEXT")
 
 
+def _ensure_pulse_columns(conn: Any) -> None:
+    """Migración: contador de pulsaciones físicas y límite de mantenimiento (solo IN)."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(panel_module_channels)").fetchall()}
+    if "pulse_count" not in cols:
+        conn.execute(
+            "ALTER TABLE panel_module_channels ADD COLUMN pulse_count INTEGER NOT NULL DEFAULT 0"
+        )
+    if "pulse_limit" not in cols:
+        conn.execute("ALTER TABLE panel_module_channels ADD COLUMN pulse_limit INTEGER")
+
+
 def ensure_panel_modules_schema() -> None:
     with get_connection() as conn:
         conn.execute(
@@ -230,6 +241,7 @@ def ensure_panel_modules_schema() -> None:
             """
         )
         _ensure_channel_name_column(conn)
+        _ensure_pulse_columns(conn)
         conn.commit()
 
 
@@ -253,7 +265,7 @@ def _row_channel(row: Tuple[Any, ...]) -> dict:
     label = row[4]
     in_code, out_code = smcse_to_in_out_codes(kind, module_id, slot_index)
     io_code = in_code if kind == "input" else out_code
-    return {
+    out = {
         "id": row[0],
         "module_id": module_id,
         "kind": kind,
@@ -266,6 +278,17 @@ def _row_channel(row: Tuple[Any, ...]) -> dict:
         "open_cmd": row[7],
         "close_cmd": row[8],
     }
+    if kind == "input":
+        out["pulse_count"] = int(row[9] or 0)
+        out["pulse_limit"] = int(row[10]) if row[10] is not None else None
+    return out
+
+
+_CHANNEL_SELECT = """
+    SELECT id, module_id, kind, slot_index, label, channel_name, address, open_cmd, close_cmd,
+           COALESCE(pulse_count, 0), pulse_limit
+    FROM panel_module_channels
+"""
 
 
 def list_module_ids_ordered() -> List[int]:
@@ -294,9 +317,8 @@ def get_channels_for_module(module_id: int) -> Tuple[List[dict], List[dict]]:
     ensure_panel_modules_schema()
     with get_connection() as conn:
         rows = conn.execute(
-            """
-            SELECT id, module_id, kind, slot_index, label, channel_name, address, open_cmd, close_cmd
-            FROM panel_module_channels
+            f"""
+            {_CHANNEL_SELECT}
             WHERE module_id = ?
             ORDER BY kind ASC, slot_index ASC, id ASC
             """,
@@ -475,6 +497,7 @@ def update_channel(
     address: Optional[int] = None,
     open_cmd: Any = ...,
     close_cmd: Any = ...,
+    pulse_limit: Any = ...,
 ) -> None:
     ensure_panel_modules_schema()
     fields: List[str] = []
@@ -497,12 +520,51 @@ def update_channel(
     if close_cmd is not ...:
         fields.append("close_cmd = ?")
         vals.append(close_cmd)
+    if pulse_limit is not ...:
+        fields.append("pulse_limit = ?")
+        vals.append(pulse_limit)
     if not fields:
         return
     vals.append(channel_id)
     with get_connection() as conn:
         conn.execute(f"UPDATE panel_module_channels SET {', '.join(fields)} WHERE id = ?", vals)
         conn.commit()
+
+
+def increment_channel_pulse_count(channel_id: int) -> int:
+    """Incrementa contador de pulsaciones físicas (solo canales input)."""
+    ensure_panel_modules_schema()
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE panel_module_channels
+            SET pulse_count = COALESCE(pulse_count, 0) + 1
+            WHERE id = ? AND kind = 'input'
+            """,
+            (channel_id,),
+        )
+        row = conn.execute(
+            "SELECT pulse_count FROM panel_module_channels WHERE id = ? AND kind = 'input'",
+            (channel_id,),
+        ).fetchone()
+        conn.commit()
+        return int(row[0]) if row else 0
+
+
+def reset_channel_pulse_count(channel_id: int) -> bool:
+    """Reinicia contador tras mantenimiento (solo canales input)."""
+    ensure_panel_modules_schema()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE panel_module_channels
+            SET pulse_count = 0
+            WHERE id = ? AND kind = 'input'
+            """,
+            (channel_id,),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def delete_channel(channel_id: int) -> bool:

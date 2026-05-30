@@ -1499,6 +1499,35 @@ function RulesFormAssistant({
   );
 }
 
+function formatPulseMaintenance(count, limit) {
+  const n = Number(count) || 0;
+  const lim =
+    limit != null && limit !== "" && Number(limit) > 0 ? Number(limit) : null;
+  if (!lim) {
+    return {
+      level: "none",
+      text: `${n.toLocaleString("es-ES")}`,
+      pct: null,
+    };
+  }
+  const pct = n / lim;
+  let level = "ok";
+  if (pct >= 1) level = "critical";
+  else if (pct >= 0.8) level = "warning";
+  return {
+    level,
+    text: `${n.toLocaleString("es-ES")} / ${lim.toLocaleString("es-ES")}`,
+    pct: Math.min(pct * 100, 100),
+  };
+}
+
+const PULSE_LEVEL_STYLE = {
+  none: { bg: C.surfaceAlt, color: C.textSub, border: C.border },
+  ok: { bg: C.greenLight, color: C.green, border: C.greenBorder },
+  warning: { bg: C.amberLight, color: C.amber, border: C.amberBorder },
+  critical: { bg: C.redFaint, color: C.red, border: C.redBorder },
+};
+
 function ModuleChannelRow({
   mod,
   channel,
@@ -1507,12 +1536,28 @@ function ModuleChannelRow({
   onRefresh,
   addUI,
   showCmdCols,
+  showPulseMaintenance = false,
 }) {
   const [channelName, setChannelName] = useState(channel.channel_name ?? "");
+  const [pulseLimitDraft, setPulseLimitDraft] = useState(
+    channel.pulse_limit != null ? String(channel.pulse_limit) : "",
+  );
 
   useEffect(() => {
     setChannelName(channel.channel_name ?? "");
   }, [channel.id, channel.channel_name]);
+
+  useEffect(() => {
+    setPulseLimitDraft(
+      channel.pulse_limit != null ? String(channel.pulse_limit) : "",
+    );
+  }, [channel.id, channel.pulse_limit]);
+
+  const pulseInfo = formatPulseMaintenance(
+    channel.pulse_count,
+    channel.pulse_limit,
+  );
+  const pulseStyle = PULSE_LEVEL_STYLE[pulseInfo.level];
 
   const saveChannelName = async () => {
     const trimmed = channelName.trim();
@@ -1522,6 +1567,49 @@ function ModuleChannelRow({
         body: JSON.stringify({ channel_name: trimmed || null }),
       });
       addUI("OK", `Nombre guardado: ${trimmed || "(vacío)"}`);
+      await onRefresh();
+    } catch (e) {
+      addUI("ERR", e.message);
+    }
+  };
+
+  const savePulseLimit = async () => {
+    const trimmed = pulseLimitDraft.trim();
+    let pulse_limit = null;
+    if (trimmed !== "") {
+      const parsed = Number.parseInt(trimmed, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        addUI("ERR", "El límite debe ser un entero >= 1 o vacío");
+        return;
+      }
+      pulse_limit = parsed;
+    }
+    try {
+      await apiFetch(`/modules/${mod.id}/channels/${channel.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ pulse_limit }),
+      });
+      addUI("OK", pulse_limit ? `Límite: ${pulse_limit}` : "Sin límite de pulsaciones");
+      await onRefresh();
+    } catch (e) {
+      addUI("ERR", e.message);
+    }
+  };
+
+  const resetPulseCount = async () => {
+    if (
+      !window.confirm(
+        `¿Reiniciar el contador de pulsaciones de IN${index + 1}? (tras mantenimiento o cambio de sensor)`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await apiFetch(
+        `/modules/${mod.id}/channels/${channel.id}/reset-pulses`,
+        { method: "POST" },
+      );
+      addUI("OK", `Contador IN${index + 1} reiniciado`);
       await onRefresh();
     } catch (e) {
       addUI("ERR", e.message);
@@ -1541,38 +1629,121 @@ function ModuleChannelRow({
         </td>
       ) : null}
       <td style={{ padding: 4 }}>
-        <div
-          style={{
-            display: "flex",
-            gap: 6,
-            alignItems: "center",
-            flexWrap: "wrap",
-          }}
-        >
-          <input
-            value={channelName}
-            onChange={(e) => setChannelName(e.target.value)}
-            placeholder="Nombre del canal"
-            title={channel.smcse_code || channel.io_code || ""}
+        <div style={{ display: "grid", gap: 8 }}>
+          <div
             style={{
-              flex: "1 1 120px",
-              minWidth: 100,
-              maxWidth: 200,
-              padding: "4px 6px",
-              fontSize: 11,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              flexWrap: "wrap",
             }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") saveChannelName();
-            }}
-          />
-          <Btn small variant="primary" onClick={saveChannelName}>
-            Guardar
-          </Btn>
-          <Btn small variant="danger" onClick={onDelete}>
-            Quitar
-          </Btn>
+          >
+            <input
+              value={channelName}
+              onChange={(e) => setChannelName(e.target.value)}
+              placeholder="Nombre del canal"
+              title={channel.smcse_code || channel.io_code || ""}
+              style={{
+                flex: "1 1 120px",
+                minWidth: 100,
+                maxWidth: 200,
+                padding: "4px 6px",
+                fontSize: 11,
+                border: `1px solid ${C.border}`,
+                borderRadius: 6,
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveChannelName();
+              }}
+            />
+            <Btn small variant="primary" onClick={saveChannelName}>
+              Guardar
+            </Btn>
+            <Btn small variant="danger" onClick={onDelete}>
+              Quitar
+            </Btn>
+          </div>
+          {showPulseMaintenance ? (
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                alignItems: "center",
+                flexWrap: "wrap",
+                padding: "6px 8px",
+                borderRadius: 8,
+                background: C.offWhite,
+                border: `1px solid ${C.border}`,
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  padding: "3px 8px",
+                  borderRadius: 999,
+                  background: pulseStyle.bg,
+                  color: pulseStyle.color,
+                  border: `1px solid ${pulseStyle.border}`,
+                  whiteSpace: "nowrap",
+                }}
+                title="Pulsaciones físicas (OFF→ON). No cuenta override."
+              >
+                Pulsaciones: {pulseInfo.text}
+              </span>
+              {pulseInfo.pct != null ? (
+                <div
+                  style={{
+                    flex: "1 1 80px",
+                    minWidth: 60,
+                    maxWidth: 120,
+                    height: 6,
+                    borderRadius: 999,
+                    background: C.border,
+                    overflow: "hidden",
+                  }}
+                  title={`${Math.round(pulseInfo.pct)}% del límite`}
+                >
+                  <div
+                    style={{
+                      width: `${pulseInfo.pct}%`,
+                      height: "100%",
+                      background:
+                        pulseInfo.level === "critical"
+                          ? C.red
+                          : pulseInfo.level === "warning"
+                            ? C.amber
+                            : C.green,
+                    }}
+                  />
+                </div>
+              ) : null}
+              <input
+                type="number"
+                min={1}
+                value={pulseLimitDraft}
+                onChange={(e) => setPulseLimitDraft(e.target.value)}
+                placeholder="Límite (opc.)"
+                title="Pulsaciones máximas antes de mantenimiento (opcional)"
+                style={{
+                  width: 88,
+                  padding: "4px 6px",
+                  fontSize: 11,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6,
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") savePulseLimit();
+                }}
+              />
+              <Btn small onClick={savePulseLimit}>
+                Guardar límite
+              </Btn>
+              <Btn small onClick={resetPulseCount}>
+                Reiniciar contador
+              </Btn>
+            </div>
+          ) : null}
         </div>
       </td>
     </tr>
@@ -1937,7 +2108,8 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
         Entradas ({inp.length})
       </div>
       <div style={{ fontSize: 10, color: C.muted, marginBottom: 4 }}>
-        Códigos reglas: IN_{String(mod.id).padStart(2, "0")}_&lt;índice&gt;
+        Códigos reglas: IN_{String(mod.id).padStart(2, "0")}_&lt;índice&gt; ·
+        Pulsaciones = activaciones físicas OFF→ON (no cuenta override)
       </div>
       <table
         style={{ width: "100%", fontSize: 11, borderCollapse: "collapse" }}
@@ -1950,6 +2122,7 @@ function ModuleDbEditor({ mod, addUI, onRefresh }) {
               channel={c}
               index={i}
               showCmdCols={false}
+              showPulseMaintenance
               addUI={addUI}
               onRefresh={onRefresh}
               onDelete={() => delCh(c.id)}

@@ -360,6 +360,7 @@ def _sync_runtime_from_db() -> None:
             "last_update": prev.get("last_update"),
             "error": prev.get("error"),
             "in_out_associated": prev.get("in_out_associated"),
+            "pulse_baseline_set": prev.get("pulse_baseline_set", False),
         }
         o_prev = input_overrides.get(mid, [])
         input_overrides[mid] = [
@@ -860,6 +861,23 @@ def _read_holding_block_if_contiguous(client: Any, slave: int, channels: List[di
     return [bool(res.registers[i]) for i in range(n)]
 
 
+def _track_input_pulse_rising_edges(board_id: int, prev_inputs_raw: tuple[bool, ...]) -> None:
+    """Cuenta flancos OFF→ON en inputs_raw (pulsaciones físicas, sin override)."""
+    ins, _ = pms.get_channels_for_module(board_id)
+    st = io_state.get(board_id)
+    if not st:
+        return
+    if not st.get("pulse_baseline_set"):
+        st["pulse_baseline_set"] = True
+        return
+    current_raw = list(st.get("inputs_raw") or [])
+    for i, ch in enumerate(ins):
+        if i >= len(prev_inputs_raw) or i >= len(current_raw):
+            continue
+        if not prev_inputs_raw[i] and current_raw[i]:
+            pms.increment_channel_pulse_count(int(ch["id"]))
+
+
 def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: bool = False) -> None:
     """
     Lee OUT/IN (y opcionalmente relation_register) vía Modbus.
@@ -921,6 +939,8 @@ def _read_all_io(board_id: int, retried: bool = False, *, _modbus_lock_held: boo
             raw = io_state[board_id]["inputs_raw"][idx]
             effective_inputs.append(raw if forced is None else forced)
         io_state[board_id]["inputs"] = effective_inputs
+
+        _track_input_pulse_rising_edges(board_id, io_before[0])
 
         io_state[board_id]["connected"] = True
         io_state[board_id]["last_update"] = datetime.now().isoformat()
@@ -2539,6 +2559,7 @@ class ChannelPatchBody(BaseModel):
     address: Optional[int] = None
     open_cmd: Optional[int] = None
     close_cmd: Optional[int] = None
+    pulse_limit: Optional[int] = None
 
 
 class BulkCommandPair(BaseModel):
@@ -2940,9 +2961,11 @@ def read_inputs(board_id: int):
             if res.isError() or not res.registers:
                 raise HTTPException(status_code=502, detail="Error leyendo entradas")
             values_raw.append(bool(res.registers[0]))
+    prev_raw = tuple(io_state[board_id].get("inputs_raw") or [])
     io_state[board_id]["inputs_raw"] = values_raw
     values_effective = [values_raw[i] if input_overrides[board_id][i] is None else input_overrides[board_id][i] for i in range(len(values_raw))]
     io_state[board_id]["inputs"] = values_effective
+    _track_input_pulse_rising_edges(board_id, prev_raw)
     return {
         "board_id": board_id,
         "inputs_raw": {f"IN{i+1}": values_raw[i] for i in range(len(values_raw))},
@@ -3197,12 +3220,18 @@ def patch_channel_api(module_id: int, channel_id: int, body: ChannelPatchBody):
         raise HTTPException(status_code=404, detail="Módulo no encontrado")
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT module_id FROM panel_module_channels WHERE id = ?",
+            "SELECT module_id, kind FROM panel_module_channels WHERE id = ?",
             (channel_id,),
         ).fetchone()
     if not row or row[0] != module_id:
         raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
     patch = body.model_dump(exclude_unset=True)
+    if "pulse_limit" in patch and row[1] != "input":
+        raise HTTPException(status_code=400, detail="pulse_limit solo aplica a entradas (IN)")
+    if "pulse_limit" in patch:
+        pl = patch["pulse_limit"]
+        if pl is not None and pl < 1:
+            raise HTTPException(status_code=400, detail="pulse_limit debe ser >= 1 o null")
     pms.update_channel(
         channel_id,
         slot_index=patch.get("slot_index"),
@@ -3211,9 +3240,28 @@ def patch_channel_api(module_id: int, channel_id: int, body: ChannelPatchBody):
         address=patch.get("address"),
         open_cmd=patch["open_cmd"] if "open_cmd" in patch else ...,
         close_cmd=patch["close_cmd"] if "close_cmd" in patch else ...,
+        pulse_limit=patch["pulse_limit"] if "pulse_limit" in patch else ...,
     )
     _sync_runtime_from_db()
     return {"ok": True, "channel_id": channel_id}
+
+
+@router.post("/modules/{module_id}/channels/{channel_id}/reset-pulses")
+def reset_channel_pulses_api(module_id: int, channel_id: int):
+    if not _board_exists(module_id):
+        raise HTTPException(status_code=404, detail="Módulo no encontrado")
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT module_id, kind FROM panel_module_channels WHERE id = ?",
+            (channel_id,),
+        ).fetchone()
+    if not row or row[0] != module_id:
+        raise HTTPException(status_code=404, detail="Canal no pertenece a este módulo")
+    if row[1] != "input":
+        raise HTTPException(status_code=400, detail="Solo entradas (IN) tienen contador de pulsaciones")
+    if not pms.reset_channel_pulse_count(channel_id):
+        raise HTTPException(status_code=404, detail="Canal no encontrado")
+    return {"ok": True, "channel_id": channel_id, "pulse_count": 0}
 
 
 @router.delete("/modules/{module_id}/channels/{channel_id}")
