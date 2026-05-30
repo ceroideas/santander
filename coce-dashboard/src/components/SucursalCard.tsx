@@ -6,7 +6,7 @@ import { getSucursalEstado, SUCURSAL_ESTADO_LABELS } from "../sucursalEstado";
 function DevicesIcon() {
   return (
     <svg
-      className="sucursal-card-icon"
+      className="sucursal-list-item-icon"
       viewBox="0 0 120 60"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
@@ -71,6 +71,15 @@ function DevicesIcon() {
   );
 }
 
+function formatPerfil(sucursal: Sucursal): string {
+  const hostLabel =
+    sucursal.port === 80 || sucursal.port === 443
+      ? sucursal.host
+      : `${sucursal.host}:${sucursal.port}`;
+  const proto = sucursal.useHttps ? "https" : "http";
+  return `${proto}://${hostLabel}`;
+}
+
 type Props = {
   sucursal: Sucursal;
   onDelete: (id: string, nombre: string) => void;
@@ -84,30 +93,30 @@ export function SucursalCard({ sucursal, onDelete }: Props) {
     live,
   );
   const estadoLabel = SUCURSAL_ESTADO_LABELS[estado];
-  const ipLabel =
-    sucursal.port === 80 || sucursal.port === 443
-      ? sucursal.host
-      : `${sucursal.host}:${sucursal.port}`;
+  const perfil = formatPerfil(sucursal);
 
   return (
-    <article className="sucursal-card">
-      <div
-        className={`sucursal-card-status sucursal-card-status--${estado}`}
-        aria-label={`Estado: ${estadoLabel}`}
-      >
-        <span className="sucursal-card-status-dot" aria-hidden />
-        <span className="sucursal-card-status-label">{estadoLabel}</span>
-      </div>
-
-      <div className="sucursal-card-icon-wrap">
+    <article className="sucursal-list-item">
+      <div className="sucursal-list-item-icon-wrap" aria-hidden>
         <DevicesIcon />
       </div>
 
-      <div className="sucursal-card-name">{sucursal.nombre}</div>
+      <div className="sucursal-list-item-info">
+        <div className="sucursal-list-item-name">{sucursal.nombre}</div>
+        <div className="sucursal-list-item-perfil" title="Perfil de conexión">
+          {perfil}
+        </div>
+      </div>
 
-      <div className="sucursal-card-ip">{ipLabel}</div>
+      <div
+        className={`sucursal-list-item-status sucursal-list-item-status--${estado}`}
+        aria-label={`Estado: ${estadoLabel}`}
+      >
+        <span className="sucursal-list-item-status-dot" aria-hidden />
+        <span className="sucursal-list-item-status-label">{estadoLabel}</span>
+      </div>
 
-      <footer className="sucursal-card-footer">
+      <footer className="sucursal-list-item-actions">
         <Link to={`/control/${sucursal.id}`} className="btn btn-open btn-sm">
           Abrir
         </Link>

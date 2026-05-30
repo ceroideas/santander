@@ -135,7 +135,7 @@ export function SucursalList() {
               <p>No hay sucursales con los filtros aplicados.</p>
             </div>
           ) : (
-            <div className="sucursal-grid">
+            <div className="sucursal-list">
               {filtered.map((s) => (
                 <SucursalCard key={s.id} sucursal={s} onDelete={onDelete} />
               ))}
