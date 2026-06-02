@@ -3182,6 +3182,31 @@ export default function ETD8A12Panel() {
       }
     });
   };
+  const applyZaguanLedEstado = async () => {
+    const canal = Number(zaguanConfigEstado.canal || 1);
+    const estado = zaguanConfigEstado.estado;
+    if (canal < 1 || canal > 4) {
+      addUI("ERR", "Canal debe estar entre 1 y 4");
+      return;
+    }
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetchZaguan(`/api/zaguan/device/canal/p${canal}/estado`, {
+          method: "POST",
+          body: JSON.stringify({ estado }),
+        });
+        addUI(
+          "OK",
+          `Estado LED aplicado: canal ${canal} → ${estado} (relee estado para comprobar)`,
+        );
+        const r = await apiFetchZaguan("/api/zaguan/device/estado");
+        setZaguanEstado(r);
+      } catch (e) {
+        addUI("ERR", `Aplicar estado LED: ${e.message}`);
+      }
+    });
+  };
+
   const saveZaguanConfigEstado = async () => {
     await withGlobalLoader(async () => {
       try {
@@ -5025,6 +5050,79 @@ export default function ETD8A12Panel() {
                 <div
                   style={{
                     marginTop: 12,
+                    padding: 10,
+                    border: `1px solid ${C.greenBorder}`,
+                    borderRadius: 8,
+                    background: C.greenLight,
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+                    Aplicar estado al LED (activo en el ESP32)
+                  </div>
+                  <div style={{ fontSize: 11, color: C.textSub, marginBottom: 8 }}>
+                    Cambia lo que ves en <strong>Leer estado</strong> y la tira LED.
+                    No uses solo «Guardar apariencia».
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      alignItems: "end",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: 11, marginBottom: 4 }}>Estado</div>
+                      <select
+                        value={zaguanConfigEstado.estado}
+                        onChange={(e) =>
+                          setZaguanConfigEstado((p) => ({
+                            ...p,
+                            estado: e.target.value,
+                          }))
+                        }
+                        style={{
+                          padding: 8,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <option value="libre">libre</option>
+                        <option value="ocupado">ocupado</option>
+                        <option value="abriendo">abriendo</option>
+                        <option value="apagado">apagado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, marginBottom: 4 }}>Canal</div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={4}
+                        value={zaguanConfigEstado.canal}
+                        onChange={(e) =>
+                          setZaguanConfigEstado((p) => ({
+                            ...p,
+                            canal: Number(e.target.value || 1),
+                          }))
+                        }
+                        style={{
+                          width: 72,
+                          padding: 8,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 6,
+                        }}
+                      />
+                    </div>
+                    <Btn variant="primary" onClick={applyZaguanLedEstado}>
+                      Aplicar al LED
+                    </Btn>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 12,
                     paddingTop: 12,
                     borderTop: `1px dashed ${C.border}`,
                   }}
@@ -5032,7 +5130,10 @@ export default function ETD8A12Panel() {
                   <div
                     style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}
                   >
-                    Config estado (`POST /api/zaguan/device/config/estado`)
+                    Config. apariencia del estado (NVS)
+                  </div>
+                  <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>
+                    Solo colores/animación guardados; no activa el estado en el LED.
                   </div>
                   <div
                     style={{
@@ -5171,8 +5272,8 @@ export default function ETD8A12Panel() {
                         borderRadius: 6,
                       }}
                     />
-                    <Btn variant="primary" onClick={saveZaguanConfigEstado}>
-                      Guardar estado visual
+                    <Btn onClick={saveZaguanConfigEstado}>
+                      Guardar apariencia (NVS)
                     </Btn>
                   </div>
                 </div>

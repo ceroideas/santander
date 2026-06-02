@@ -242,7 +242,9 @@ def device_set_estado_canal(
     if body is None:
         raise HTTPException(status_code=400, detail="Body requerido: {estado}")
     try:
-        return zaguan_led_client.set_estado_canal(canal, body.estado)
+        result = zaguan_led_client.set_estado_canal(canal, body.estado)
+        actualizar_estado_canal(canal, body.estado)
+        return result
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
 
