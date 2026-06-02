@@ -4,6 +4,7 @@ Arranque: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,12 @@ ZAGUAN_PULSADOR_TO_OUT_CODE = {
     "p4": "OUT_03_01",  # Interior P2
 }
 ZAGUAN_PULSE_SECONDS = 0.7
+ZAGUAN_CAPTURE_ONLY = os.getenv("ZAGUAN_PULSACION_CAPTURE_ONLY", "1").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 
 async def _events_retention_loop() -> None:
@@ -69,6 +76,11 @@ async def _auto_rules_background_loop() -> None:
 async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
     """Callback base para pulsaciones de zaguán (p1..p4) con mapeo fijo."""
     log.info("Pulsación zaguán recibida: canal=%s ts=%s", canal, ts)
+    if ZAGUAN_CAPTURE_ONLY:
+        log.info(
+            "ZAGUAN_PULSACION_CAPTURE_ONLY activo: solo captura/log, sin apertura Modbus"
+        )
+        return
     out_code = ZAGUAN_PULSADOR_TO_OUT_CODE.get(canal)
     if not out_code:
         log.warning("Canal zaguán sin mapeo fijo: %s", canal)

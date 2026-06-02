@@ -11,10 +11,11 @@ Añadir al server.py:
     app.include_router(esp32_router)
 """
 
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Request
 from pydantic import BaseModel
 from typing import Any, Literal, Callable
 import logging
+import asyncio
 
 from app.services import zaguan_led_client
 
@@ -68,6 +69,7 @@ def registrar_callback_pulsacion(fn: Callable):
 class PulsacionBody(BaseModel):
     canal: int          # 1-4
     ts:    int          # millis() del ESP32
+    estado: str | None = None
 
 
 class EstadoCanalBody(BaseModel):
@@ -158,6 +160,7 @@ async def set_estado_zaguan(
 @router.post("/zaguan/pulsacion/{canal}")
 async def recibir_pulsacion(
     canal: CanalValido = Path(..., description="Canal pulsado: p1|p2|p3|p4"),
+    request: Request = None,
     body: PulsacionBody = None
 ):
     """
@@ -170,22 +173,37 @@ async def recibir_pulsacion(
       p3 → pulsador canal 3 (interior P1)
       p4 → pulsador canal 4 (interior P2)
     """
-    ts = body.ts if body else 0
-    logger.info(f"[ESP32] Pulsación canal {canal} (ts={ts})")
-
-    # Ejecutar callback registrado por el sistema de control
-    if _callback_pulsacion is not None:
+    payload_raw: Any = None
+    if request is not None:
         try:
-            import asyncio
-            if asyncio.iscoroutinefunction(_callback_pulsacion):
-                await _callback_pulsacion(canal, ts)
-            else:
-                _callback_pulsacion(canal, ts)
-        except Exception as e:
-            logger.error(f"[ESP32] Error en callback pulsación: {e}")
+            payload_raw = await request.json()
+        except Exception:
+            payload_raw = None
+    ts = body.ts if body else (int(payload_raw.get("ts")) if isinstance(payload_raw, dict) and payload_raw.get("ts") is not None else 0)
+    logger.info("[ESP32] PULSACION RECIBIDA canal=%s", canal)
+    logger.info("[ESP32] Payload pulsacion: %s", payload_raw if payload_raw is not None else (body.model_dump() if body else {}))
 
-    # Respuesta inmediata — el ESP32 no la espera pero es buena práctica
-    return {"ok": True, "canal": canal}
+    # Fire-and-forget: la respuesta no espera lógica de negocio/Modbus.
+    if _callback_pulsacion is not None:
+        asyncio.create_task(_ejecutar_callback_pulsacion(canal, ts))
+
+    return {"ok": True}
+
+
+@router.post("/api/zaguan/pulsacion")
+@router.post("/zaguan/pulsacion")
+async def recibir_pulsacion_base(request: Request):
+    """
+    Endpoint temporal de captura genérica de payload.
+    Permite inspeccionar el body real que envía el ESP32 sin asumir canal en la ruta.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    logger.info("[ESP32] PULSACION RECIBIDA (base)")
+    logger.info("[ESP32] Payload pulsacion (base): %s", payload)
+    return {"ok": True}
 
 
 # ══════════════════════════════════════════════════════════
@@ -311,3 +329,14 @@ def actualizar_estado_canal(canal: str, estado: EstadoValido):
 def get_estado_actual() -> dict:
     """Devuelve el estado actual de todos los canales."""
     return _estado_canales.copy()
+
+
+async def _ejecutar_callback_pulsacion(canal: str, ts: int) -> None:
+    """Ejecuta callback de pulsación sin bloquear el response HTTP."""
+    try:
+        if asyncio.iscoroutinefunction(_callback_pulsacion):
+            await _callback_pulsacion(canal, ts)
+        else:
+            _callback_pulsacion(canal, ts)
+    except Exception as e:
+        logger.error("[ESP32] Error en callback pulsación: %s", e)

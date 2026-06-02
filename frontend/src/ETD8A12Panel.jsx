@@ -3205,6 +3205,23 @@ export default function ETD8A12Panel() {
       }
     });
   };
+  const simulateZaguanPulse = async (canal) => {
+    await withGlobalLoader(async () => {
+      try {
+        await apiFetchZaguan(`/api/zaguan/pulsacion/p${canal}`, {
+          method: "POST",
+          body: JSON.stringify({
+            canal,
+            ts: Date.now(),
+            estado: "libre",
+          }),
+        });
+        addUI("OK", `Pulsación simulada enviada: p${canal}`);
+      } catch (e) {
+        addUI("ERR", `Simulación p${canal}: ${e.message}`);
+      }
+    });
+  };
   const saveRulesJson = async () => {
     await withGlobalLoader(async () => {
       try {
@@ -4624,6 +4641,48 @@ export default function ETD8A12Panel() {
                     <Btn onClick={pingZaguanDevice}>Ping</Btn>
                     <Btn onClick={readZaguanDeviceEstado}>Leer estado</Btn>
                     <Btn onClick={readZaguanDeviceOta}>Leer OTA</Btn>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    background: C.offWhite,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: C.textMid,
+                      marginBottom: 4,
+                    }}
+                  >
+                    Simular pulsación → backend (sin botón físico)
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                    Igual que cuando el ESP32 pulsa: avisa al <strong>backend</strong>{" "}
+                    (<code>POST /api/zaguan/pulsacion/pN</code>), no al ESP32.
+                    Para probar el ESP32 (LEDs, ping, config) usa los botones de arriba
+                    (Ping, Leer estado) o la config de canal/estado más abajo → van a{" "}
+                    <code>http://IP-ESP32:80/api/...</code> vía el backend.
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <Btn small onClick={() => simulateZaguanPulse(1)}>
+                      Simular pulsación P1
+                    </Btn>
+                    <Btn small onClick={() => simulateZaguanPulse(2)}>
+                      Simular pulsación P2
+                    </Btn>
+                    <Btn small onClick={() => simulateZaguanPulse(3)}>
+                      Simular pulsación P3
+                    </Btn>
+                    <Btn small onClick={() => simulateZaguanPulse(4)}>
+                      Simular pulsación P4
+                    </Btn>
                   </div>
                 </div>
 
