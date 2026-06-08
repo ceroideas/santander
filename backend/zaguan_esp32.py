@@ -132,7 +132,16 @@ async def get_estado_zaguan():
         "p4": "apagado"
     }
     """
-    return _estado_canales.copy()
+    out: dict[str, Any] = dict(_estado_canales)
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        extra = zo.get_autoservicio_status()
+        if extra.get("winhose_window_active") or extra.get("p2_intermittent"):
+            out["_autoservicio"] = extra
+    except Exception:  # noqa: BLE001
+        pass
+    return out
 
 
 @router.post("/api/zaguan/estado/{canal}")

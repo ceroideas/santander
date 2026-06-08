@@ -111,6 +111,45 @@ const TABS = [
 ];
 const HISTORICO_TAB_INDEX = TABS.indexOf("Histórico");
 
+/** ESP32 zaguán: canal pN → puerta física y ubicación del pulsador/LED */
+const ZAGUAN_PULSADOR_CANALES = [
+  {
+    canal: 1,
+    puerta: "P1 (calle)",
+    ubicacion: "Exterior",
+    led: "C1",
+    inModbus: "IN_02_08",
+  },
+  {
+    canal: 2,
+    puerta: "P2 (oficina)",
+    ubicacion: "Exterior",
+    led: "C2",
+    inModbus: "IN_03_08",
+  },
+  {
+    canal: 3,
+    puerta: "P1 (calle)",
+    ubicacion: "Interior",
+    led: "C3",
+    inModbus: "IN_02_07",
+  },
+  {
+    canal: 4,
+    puerta: "P2 (oficina)",
+    ubicacion: "Interior",
+    led: "C4",
+    inModbus: "IN_03_07",
+  },
+];
+
+function zaguanCanalHint(canal) {
+  const n = Number(canal);
+  const info = ZAGUAN_PULSADOR_CANALES.find((c) => c.canal === n);
+  if (!info) return null;
+  return `${info.led} · ${info.puerta} · ${info.ubicacion}`;
+}
+
 function normalizeHexColor(
   raw,
   fallback = DEFAULT_TEMPLATE_CONFIG.primaryColor,
@@ -4695,19 +4734,48 @@ export default function ETD8A12Panel() {
                     (Ping, Leer estado) o la config de canal/estado más abajo → van a{" "}
                     <code>http://IP-ESP32:80/api/...</code> vía el backend.
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <Btn small onClick={() => simulateZaguanPulse(1)}>
-                      Simular pulsación P1
-                    </Btn>
-                    <Btn small onClick={() => simulateZaguanPulse(2)}>
-                      Simular pulsación P2
-                    </Btn>
-                    <Btn small onClick={() => simulateZaguanPulse(3)}>
-                      Simular pulsación P3
-                    </Btn>
-                    <Btn small onClick={() => simulateZaguanPulse(4)}>
-                      Simular pulsación P4
-                    </Btn>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(200px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {ZAGUAN_PULSADOR_CANALES.map(
+                      ({ canal, puerta, ubicacion, led, inModbus }) => (
+                        <div
+                          key={canal}
+                          style={{
+                            padding: 10,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 8,
+                            background: C.white,
+                          }}
+                        >
+                          <Btn
+                            small
+                            onClick={() => simulateZaguanPulse(canal)}
+                            style={{ width: "100%" }}
+                          >
+                            Simular pulsación p{canal}
+                          </Btn>
+                          <div
+                            style={{
+                              marginTop: 8,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: C.textMid,
+                            }}
+                          >
+                            {led} — {puerta}
+                          </div>
+                          <div style={{ fontSize: 10, color: C.muted }}>
+                            {ubicacion} · Modbus {inModbus}
+                          </div>
+                        </div>
+                      ),
+                    )}
                   </div>
                 </div>
 
@@ -4987,24 +5055,31 @@ export default function ETD8A12Panel() {
                       alignItems: "end",
                     }}
                   >
-                    <input
-                      type="number"
-                      min={1}
-                      max={4}
-                      value={zaguanConfigCanal.canal}
-                      onChange={(e) =>
-                        setZaguanConfigCanal((p) => ({
-                          ...p,
-                          canal: Number(e.target.value || 1),
-                        }))
-                      }
-                      style={{
-                        width: "100%",
-                        padding: 8,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 6,
-                      }}
-                    />
+                    <div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={4}
+                        value={zaguanConfigCanal.canal}
+                        onChange={(e) =>
+                          setZaguanConfigCanal((p) => ({
+                            ...p,
+                            canal: Number(e.target.value || 1),
+                          }))
+                        }
+                        style={{
+                          width: "100%",
+                          padding: 8,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 6,
+                        }}
+                      />
+                      {zaguanCanalHint(zaguanConfigCanal.canal) ? (
+                        <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>
+                          {zaguanCanalHint(zaguanConfigCanal.canal)}
+                        </div>
+                      ) : null}
+                    </div>
                     <input
                       type="number"
                       min={1}
@@ -5113,6 +5188,18 @@ export default function ETD8A12Panel() {
                           borderRadius: 6,
                         }}
                       />
+                      {zaguanCanalHint(zaguanConfigEstado.canal) ? (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: C.muted,
+                            marginTop: 4,
+                            maxWidth: 160,
+                          }}
+                        >
+                          {zaguanCanalHint(zaguanConfigEstado.canal)}
+                        </div>
+                      ) : null}
                     </div>
                     <Btn variant="primary" onClick={applyZaguanLedEstado}>
                       Aplicar al LED

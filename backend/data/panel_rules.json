@@ -323,7 +323,7 @@
     "activate_outputs": [
       "OUT_02_01",
       "OUT_02_02",
-      "OUT_03_04"
+      "OUT_03_07"
     ],
     "deactivate_outputs": [
       "OUT_02_03",
@@ -341,7 +341,6 @@
       "OUT_03_03",
       "OUT_03_05",
       "OUT_03_06",
-      "OUT_03_07",
       "OUT_03_08",
       "OUT_03_09",
       "OUT_03_10",
@@ -358,7 +357,8 @@
       "OUT_01_09",
       "OUT_01_10",
       "OUT_01_11",
-      "OUT_01_12"
+      "OUT_01_12",
+      "OUT_03_04"
     ]
   },
   "horario_manual": {
@@ -715,7 +715,7 @@
       "OUT_03_02"
     ],
     "deactivate_outputs_temporary": true,
-    "pulse_seconds": 0
+    "pulse_seconds": 2
   },
   "interfono_puerta_oficina_exterior": {
     "enabled": true,
@@ -734,7 +734,7 @@
       "OUT_03_02"
     ],
     "deactivate_outputs_temporary": true,
-    "pulse_seconds": 0
+    "pulse_seconds": 2
   },
   "interfono_puerta_calle_interior": {
     "enabled": true,
@@ -751,7 +751,7 @@
       "OUT_02_02"
     ],
     "deactivate_outputs_temporary": true,
-    "pulse_seconds": 0
+    "pulse_seconds": 2
   },
   "interfono_puerta_calle_exterior": {
     "enabled": true,
@@ -770,7 +770,7 @@
       "OUT_02_02"
     ],
     "deactivate_outputs_temporary": true,
-    "pulse_seconds": 0
+    "pulse_seconds": 2
   },
   "llave_emergencia_puerta_oficina": {
     "enabled": true,
