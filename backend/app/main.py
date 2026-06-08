@@ -4,7 +4,6 @@ Arranque: uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 import asyncio
 import logging
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -22,6 +21,7 @@ from app.db import system_events_store as ses
 from app.middleware.panel_api_auth import PanelApiAuthMiddleware
 from app.middleware.tablet_actor_context import TabletActorContextMiddleware
 from zaguan_esp32 import registrar_callback_pulsacion, router as zaguan_esp32_router
+from app.services import zaguan_orchestrator
 
 logging.basicConfig(
     level=logging.DEBUG if settings.debug else logging.INFO,
@@ -29,23 +29,6 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 log = logging.getLogger("control_accesos")
-
-# Mapeo fijo de pulsadores ESP32 -> salida física a activar en ETD8A12.
-# Ajustar estos códigos OUT_YY_ZZ según instalación real.
-ZAGUAN_PULSADOR_TO_OUT_CODE = {
-    "p1": "OUT_02_01",  # Exterior calle P1
-    "p2": "OUT_03_01",  # Exterior oficina P2
-    "p3": "OUT_02_01",  # Interior P1
-    "p4": "OUT_03_01",  # Interior P2
-}
-ZAGUAN_PULSE_SECONDS = 0.7
-ZAGUAN_CAPTURE_ONLY = os.getenv("ZAGUAN_PULSACION_CAPTURE_ONLY", "1").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-
 
 async def _events_retention_loop() -> None:
     while True:
@@ -74,57 +57,12 @@ async def _auto_rules_background_loop() -> None:
 
 
 async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
-    """Callback base para pulsaciones de zaguán (p1..p4) con mapeo fijo."""
+    """Orquestador zaguán: LEDs + apertura según modo (automático / autoservicio)."""
     log.info("Pulsación zaguán recibida: canal=%s ts=%s", canal, ts)
-    if ZAGUAN_CAPTURE_ONLY:
-        log.info(
-            "ZAGUAN_PULSACION_CAPTURE_ONLY activo: solo captura/log, sin apertura Modbus"
-        )
+    if canal not in ("p1", "p2", "p3", "p4"):
+        log.warning("Canal zaguán no válido: %s", canal)
         return
-    out_code = ZAGUAN_PULSADOR_TO_OUT_CODE.get(canal)
-    if not out_code:
-        log.warning("Canal zaguán sin mapeo fijo: %s", canal)
-        try:
-            ses.record_event(
-                "WARN",
-                f"Pulsación zaguán sin mapeo: {canal}",
-                event_type="zaguan_button_unmapped",
-                source="zaguan_esp32",
-                payload={"canal": canal, "ts": ts},
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return
-
-    # Pulso de apertura: ON corto y luego OFF (Modbus síncrono → hilo aparte).
-    try:
-        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, True)
-        await asyncio.sleep(ZAGUAN_PULSE_SECONDS)
-        await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, False)
-    except Exception as e:  # noqa: BLE001
-        log.warning("Error al ejecutar mapeo zaguán %s -> %s: %s", canal, out_code, e)
-        try:
-            ses.record_event(
-                "ERR",
-                f"Error mapeo zaguán {canal} -> {out_code}",
-                event_type="zaguan_button_action_error",
-                source="zaguan_esp32",
-                payload={"canal": canal, "out_code": out_code, "ts": ts, "error": str(e)},
-            )
-        except Exception:  # noqa: BLE001
-            pass
-        return
-
-    try:
-        ses.record_event(
-            "INFO",
-            f"Pulsación zaguán {canal} -> {out_code}",
-            event_type="zaguan_button_press",
-            source="zaguan_esp32",
-            payload={"canal": canal, "out_code": out_code, "ts": ts},
-        )
-    except Exception as e:  # noqa: BLE001
-        log.warning("No se pudo registrar evento zaguán: %s", e)
+    await zaguan_orchestrator.handle_pulsacion(canal, ts)
 
 
 @asynccontextmanager
@@ -140,6 +78,10 @@ async def lifespan(app: FastAPI):
     except Exception as e:  # noqa: BLE001
         log.warning("system_events al arranque: %s", e)
     registrar_callback_pulsacion(_on_zaguan_pulsacion)
+    try:
+        zaguan_orchestrator.bootstrap_from_panel()
+    except Exception as e:  # noqa: BLE001
+        log.warning("Bootstrap orquestador zaguán: %s", e)
     retention_task = asyncio.create_task(_events_retention_loop())
     auto_rules_task: Optional[asyncio.Task] = None
     if settings.auto_rules_background_enabled:

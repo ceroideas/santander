@@ -111,6 +111,26 @@ def _coce_notify(event_type: str, payload: dict | None = None) -> None:
         _publish_panel_status_debounced()
 
 
+def _zaguan_mode_changed(mode: Optional[str]) -> None:
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.on_mode_changed(mode)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _zaguan_rule_executed(rule_key: str, result: dict) -> None:
+    if not result.get("executed"):
+        return
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.on_rule_executed(rule_key, result)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # Modos operativos de consola central (IN1–IN7) + emergencia/incendio (actuación 8, IN9 central).
 HORARIO_MODE_KEY_PREFIX = "horario_"
 EMERGENCY_MODE_RULE_KEYS = frozenset({"senal_de_incendio_activada"})
@@ -559,6 +579,7 @@ def _restore_operational_mode_after_emergency() -> None:
     current_mode = restored
     _persist_current_mode_to_db()
     _coce_notify("mode_changed", {"current_mode": current_mode})
+    _zaguan_mode_changed(current_mode)
 
 
 def _load_persisted_panel_state() -> None:
@@ -2107,6 +2128,7 @@ def _evaluate_trigger_rule(
         current_mode = rule_key
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
+        _zaguan_mode_changed(current_mode)
     _persist_overrides_to_db()
 
     origin_tag = f"enclavamiento:{rule_key}"
@@ -2226,6 +2248,7 @@ def _deactivate_rule_on_fall(
         current_mode = None
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": None})
+        _zaguan_mode_changed(None)
 
     _restore_temp_deactivate_outputs(
         rule, rule_key, apply_outputs_to_hardware, origin=f"desactiva_flanco:{rule_key}"
@@ -2296,6 +2319,7 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
             )
             if result.get("executed"):
                 executed += 1
+                _zaguan_rule_executed(rk, result)
             elif result.get("blocked_inputs") and "Bloqueado" in (
                 result.get("reason") or ""
             ):
@@ -2334,6 +2358,12 @@ def background_auto_rules_cycle(*, deactivate_on_fall: bool = True) -> dict:
     background_auto_rules_last_run_at = result["timestamp"]
     background_auto_rules_last_result = result
     background_auto_rules_last_error = error_messages[0] if error_messages else None
+    try:
+        from app.services import zaguan_orchestrator as zo
+
+        zo.poll_door_sensors()
+    except Exception:  # noqa: BLE001
+        pass
     return result
 
 
@@ -2481,11 +2511,12 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         current_mode = rule_key
         _persist_current_mode_to_db()
         _coce_notify("mode_changed", {"current_mode": current_mode})
+        _zaguan_mode_changed(current_mode)
     _persist_overrides_to_db()
     if rule_key in rules_runtime:
         rules_runtime[rule_key]["last_executed_at"] = datetime.now().isoformat()
     add_event("OK", f"Regla forzada ejecutada: {rule_key}", 1)
-    return {
+    out = {
         "executed": True,
         "rule": rule_key,
         "trigger": trigger_code,
@@ -2495,6 +2526,8 @@ def _execute_rule_forced(rule_key: str, apply_outputs_to_hardware: bool = True) 
         "outputs_skipped_disconnected": skipped_disconnected,
         "mode": current_mode,
     }
+    _zaguan_rule_executed(rule_key, out)
+    return out
 
 
 class BoardConfig(BaseModel):
@@ -3378,8 +3411,19 @@ def api_v1_clear_current_mode_if_match(rule_key: str) -> dict:
     current_mode = None
     _persist_current_mode_to_db()
     _coce_notify("mode_changed", {"current_mode": None})
+    _zaguan_mode_changed(None)
     add_event("INFO", f"Modo desactivado vía API tablet: {rule_key}", 1)
     return {"cleared": True, "current_mode": None, "outputs_restored": restored}
+
+
+def api_v1_read_input_by_code(code: str) -> bool:
+    """Lectura efectiva de un IN del panel (override + snapshot IO)."""
+    return _read_input_effective(
+        code,
+        use_hardware_if_no_override=False,
+        use_overrides=True,
+        physical_inputs=False,
+    )
 
 
 def api_v1_execute_rule_for_tablet(rule_key: str) -> dict:
