@@ -143,6 +143,26 @@ const ZAGUAN_PULSADOR_CANALES = [
   },
 ];
 
+/** WinHose: inductivo llave echada (cerrado=ON, abierto=OFF → flanco ON→OFF). */
+const ZAGUAN_LLAVE_ECHADA = [
+  {
+    id: 1,
+    label: "Llave echada 1",
+    puerta: "P1 (calle)",
+    code: "IN_02_03",
+    placa: 2,
+    canalIn: 3,
+  },
+  {
+    id: 2,
+    label: "Llave echada 2",
+    puerta: "P2 (oficina)",
+    code: "IN_03_03",
+    placa: 3,
+    canalIn: 3,
+  },
+];
+
 function zaguanCanalHint(canal) {
   const n = Number(canal);
   const info = ZAGUAN_PULSADOR_CANALES.find((c) => c.canal === n);
@@ -3272,7 +3292,7 @@ export default function ETD8A12Panel() {
   const simulateZaguanPulse = async (canal) => {
     await withGlobalLoader(async () => {
       try {
-        await apiFetchZaguan(`/api/zaguan/pulsacion/p${canal}`, {
+        const res = await apiFetchZaguan(`/api/zaguan/pulsacion/p${canal}`, {
           method: "POST",
           body: JSON.stringify({
             canal,
@@ -3280,9 +3300,62 @@ export default function ETD8A12Panel() {
             estado: "libre",
           }),
         });
-        addUI("OK", `Pulsación simulada enviada: p${canal}`);
+        if (res?.ok === false) {
+          addUI("WARN", `p${canal} rechazada: ${res.reason || "sin motivo"}`);
+        } else if (res?.modbus_ok === false) {
+          addUI(
+            "WARN",
+            `p${canal}: orquestador OK pero Modbus no abrió — ${res?.modbus_detail?.reason || "revisa panel"}`,
+          );
+        } else {
+          const extra =
+            res?.modbus_detail?.direct_output != null
+              ? ` (${res.modbus_detail.direct_output})`
+              : "";
+          addUI("OK", `Pulsación p${canal}${extra}`);
+        }
       } catch (e) {
         addUI("ERR", `Simulación p${canal}: ${e.message}`);
+      }
+    });
+  };
+  const emulateLlaveEchada = async (llaveId, action) => {
+    await withGlobalLoader(async () => {
+      try {
+        const meta = ZAGUAN_LLAVE_ECHADA.find((l) => l.id === llaveId);
+        const res = await apiFetchZaguan(
+          `/api/zaguan/emulate/llave-echada/${llaveId}`,
+          {
+            method: "POST",
+            body: JSON.stringify({ action }),
+          },
+        );
+        const actionLabel = {
+          cerrar: "cerrada (ON)",
+          abrir: "abierta (OFF)",
+          maniobra: "maniobra ON→OFF",
+          real: "lectura REAL",
+        }[action];
+        let msg = `${meta?.label || llaveId}: ${actionLabel}`;
+        if (res?.winhose_window_active) {
+          msg += ` — ventana WinHose ${Math.ceil(res.winhose_window_remaining_s || 0)}s`;
+          if (res?.winhose_intermittent) {
+            msg += " (intermitente activo)";
+          }
+        } else if (action === "maniobra") {
+          addUI(
+            "ERR",
+            `${meta?.label}: maniobra sin ventana WinHose — ¿modo cerrado o autoservicio activo?`,
+          );
+          return;
+        }
+        addUI(
+          res?.winhose_window_active ? "OK" : "INFO",
+          msg,
+        );
+        void afterPanelMutation();
+      } catch (e) {
+        addUI("ERR", `Llave echada ${llaveId}: ${e.message}`);
       }
     });
   };
@@ -4776,6 +4849,112 @@ export default function ETD8A12Panel() {
                         </div>
                       ),
                     )}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 10,
+                    padding: 10,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    background: C.offWhite,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: C.textMid,
+                      marginBottom: 4,
+                    }}
+                  >
+                    Emular llave echada (WinHose)
+                  </div>
+                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 8 }}>
+                    Fuerza el inductivo Modbus (cerrado=ON, abierto=OFF).{" "}
+                    <strong>Maniobra completa</strong> simula el flanco ON→OFF y activa
+                    la ventana 15 s en autoservicio/cerrado. Modos:{" "}
+                    <code>IN_02_03</code> (P1), <code>IN_03_03</code> (P2).
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(220px, 1fr))",
+                      gap: 10,
+                    }}
+                  >
+                    {ZAGUAN_LLAVE_ECHADA.map((llave) => (
+                      <div
+                        key={llave.id}
+                        style={{
+                          padding: 10,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 8,
+                          background: C.white,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 600,
+                            color: C.textMid,
+                            marginBottom: 8,
+                          }}
+                        >
+                          {llave.label} — {llave.puerta}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: C.muted,
+                            marginBottom: 8,
+                          }}
+                        >
+                          {llave.code} · Placa {llave.placa} IN{llave.canalIn}
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 1fr",
+                            gap: 6,
+                          }}
+                        >
+                          <Btn
+                            small
+                            onClick={() =>
+                              emulateLlaveEchada(llave.id, "cerrar")
+                            }
+                          >
+                            Cerrar (ON)
+                          </Btn>
+                          <Btn
+                            small
+                            onClick={() => emulateLlaveEchada(llave.id, "abrir")}
+                          >
+                            Abrir (OFF)
+                          </Btn>
+                          <Btn
+                            small
+                            variant="primary"
+                            onClick={() =>
+                              emulateLlaveEchada(llave.id, "maniobra")
+                            }
+                            style={{ gridColumn: "1 / -1" }}
+                          >
+                            Maniobra completa (ON→OFF)
+                          </Btn>
+                          <Btn
+                            small
+                            onClick={() => emulateLlaveEchada(llave.id, "real")}
+                            style={{ gridColumn: "1 / -1" }}
+                          >
+                            Volver a lectura REAL
+                          </Btn>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

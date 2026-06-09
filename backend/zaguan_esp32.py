@@ -112,6 +112,58 @@ class DeviceTargetBody(BaseModel):
     timeout_s: float = 2.0
 
 
+class LlaveEchadaEmulateBody(BaseModel):
+    action: Literal["cerrar", "abrir", "maniobra", "real"]
+
+
+# Llave WinHose: IN3 placa 2 = P1, IN3 placa 3 = P2. Cerrado=ON, abierto=OFF.
+LLAVE_ECHADA_BY_ID: dict[int, dict[str, Any]] = {
+    1: {
+        "board_id": 2,
+        "channel": 3,
+        "code": "IN_02_03",
+        "door": "p1",
+        "label": "Llave echada 1",
+        "puerta": "P1 (calle)",
+    },
+    2: {
+        "board_id": 3,
+        "channel": 3,
+        "code": "IN_03_03",
+        "door": "p2",
+        "label": "Llave echada 2",
+        "puerta": "P2 (oficina)",
+    },
+}
+
+
+def _emulate_llave_override(board_id: int, channel: int, state: bool | None) -> None:
+    from app.api.routes import panel as panel_mod
+    from app.db import panel_modules_store as pms
+
+    if board_id not in panel_mod.input_overrides:
+        raise HTTPException(status_code=404, detail=f"Placa {board_id} no configurada")
+    ins, _ = pms.get_channels_for_module(board_id)
+    if not 1 <= channel <= len(ins):
+        raise HTTPException(status_code=400, detail=f"Canal {channel} fuera de rango")
+    panel_mod.input_overrides[board_id][channel - 1] = state
+    panel_mod._persist_overrides_to_db()
+    panel_mod.add_event(
+        "INFO",
+        f"Emulación llave echada: IN{channel:02d} P{board_id} → "
+        f"{'REAL' if state is None else ('ON (cerrado)' if state else 'OFF (abierto)')}",
+        board_id,
+    )
+
+
+def _poll_zaguan_after_llave_emulation() -> dict[str, Any]:
+    from app.services import zaguan_orchestrator as zo
+
+    zo.poll_winhose()
+    zo.poll_door_sensors()
+    return zo.get_autoservicio_status()
+
+
 # ══════════════════════════════════════════════════════════
 #  ENDPOINT 1 — Estado al arrancar
 #  El ESP32 hace GET aquí nada más conectar
@@ -192,9 +244,13 @@ async def recibir_pulsacion(
     logger.info("[ESP32] PULSACION RECIBIDA canal=%s", canal)
     logger.info("[ESP32] Payload pulsacion: %s", payload_raw if payload_raw is not None else (body.model_dump() if body else {}))
 
-    # Fire-and-forget: la respuesta no espera lógica de negocio/Modbus.
     if _callback_pulsacion is not None:
-        asyncio.create_task(_ejecutar_callback_pulsacion(canal, ts))
+        if asyncio.iscoroutinefunction(_callback_pulsacion):
+            result = await _callback_pulsacion(canal, ts)
+            if isinstance(result, dict):
+                return result
+        else:
+            asyncio.create_task(_ejecutar_callback_pulsacion(canal, ts))
 
     return {"ok": True}
 
@@ -317,6 +373,69 @@ def device_target_set(body: DeviceTargetBody):
         )
     except zaguan_led_client.ZaguanLedClientError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.get("/api/zaguan/emulate/llave-echada")
+def list_llave_echada_emulation():
+    """Catálogo de llaves WinHose emulables (panel pulsadores)."""
+    return {"llaves": list(LLAVE_ECHADA_BY_ID.values())}
+
+
+@router.post("/api/zaguan/emulate/llave-echada/{llave_id}")
+def emulate_llave_echada(
+    llave_id: int = Path(..., ge=1, le=2),
+    body: LlaveEchadaEmulateBody = ...,
+):
+    """
+    Emula inductivo llave echada (WinHose) vía override Modbus.
+    cerrar=ON, abrir=OFF; maniobra hace ON→OFF y dispara ventana 15 s en el orquestador.
+    """
+    meta = LLAVE_ECHADA_BY_ID.get(llave_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="Llave no definida")
+    board_id = int(meta["board_id"])
+    channel = int(meta["channel"])
+    action = body.action
+
+    if action == "real":
+        _emulate_llave_override(board_id, channel, None)
+    elif action == "cerrar":
+        _emulate_llave_override(board_id, channel, True)
+    elif action == "abrir":
+        _emulate_llave_override(board_id, channel, False)
+    elif action == "maniobra":
+        from app.services import zaguan_orchestrator as zo
+
+        _emulate_llave_override(board_id, channel, True)
+        _emulate_llave_override(board_id, channel, False)
+        door = meta["door"]
+        ok_wh, wh_reason = zo.trigger_winhose_window(door)
+        if not ok_wh:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"No se activó ventana WinHose en {door}",
+                    "reason": wh_reason,
+                    "current_mode": zo.get_current_mode(),
+                },
+            )
+    else:
+        raise HTTPException(status_code=400, detail="Acción no válida")
+
+    status = _poll_zaguan_after_llave_emulation()
+    door = meta["door"]
+    wh = (status.get("winhose_by_door") or {}).get(door) or {}
+    return {
+        "ok": True,
+        "llave_id": llave_id,
+        "action": action,
+        "code": meta["code"],
+        "override": None if action == "real" else (True if action == "cerrar" else False),
+        "winhose_window_active": bool(wh.get("active")),
+        "winhose_window_remaining_s": wh.get("remaining_s", 0.0),
+        "winhose_intermittent": bool(wh.get("intermittent_scheduled")),
+        "zaguan_status": status,
+    }
 
 
 # ══════════════════════════════════════════════════════════

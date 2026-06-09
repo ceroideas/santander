@@ -62,13 +62,14 @@ async def _on_zaguan_pulsacion(canal: str, ts: int) -> None:
     if canal not in ("p1", "p2", "p3", "p4"):
         log.warning("Canal zaguán no válido: %s", canal)
         return
-    await zaguan_orchestrator.handle_pulsacion(canal, ts)
+    return await zaguan_orchestrator.handle_pulsacion(canal, ts)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Inicio y cierre: conexión BD, polling Modbus, etc."""
     log.info("Iniciando servicio Control de Accesos")
+    zaguan_orchestrator.bind_async_loop(asyncio.get_running_loop())
     panel_live_pump = asyncio.create_task(panel_live_hub.pump_loop())
     try:
         ses.ensure_system_events_schema()

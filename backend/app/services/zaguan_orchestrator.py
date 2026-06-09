@@ -2,7 +2,7 @@
 Orquestador zaguán: LEDs ESP32 + apertura Modbus según modo operativo.
 
 Modos implementados: horario_automatico, horario_esclusa, horario_autoservicio,
-horario_extendido.
+horario_extendido, horario_cerrado.
 """
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Literal, Optional
+from collections.abc import Coroutine
+from typing import Any, Literal, Optional, Union
 
 from app.db import system_events_store as ses
 
@@ -26,16 +27,26 @@ SUPPORTED_MODES = frozenset(
         "horario_esclusa",
         "horario_autoservicio",
         "horario_extendido",
+        "horario_cerrado",
     }
 )
 INTERLOCK_MODES = frozenset({"horario_esclusa", "horario_extendido"})
+STRICT_INTERLOCK_MODES = frozenset({"horario_autoservicio", "horario_cerrado"})
+WINHOSE_MODES = frozenset({"horario_autoservicio", "horario_cerrado"})
 
-# Autoservicio (Excel ENTRADAS Y SALIDAS — módulo 3, IN3 inductivo llave echada)
-WINHOSE_IN_P2 = "IN_03_03"
+# WinHose: IN3 por placa. Cerrado=ON, abierto=OFF → flanco ON→OFF → ventana 15 s.
+WINHOSE_INPUT_BY_DOOR: dict[PuertaId, str] = {
+    "p1": "IN_02_03",
+    "p2": "IN_03_03",
+}
 WINHOSE_WINDOW_SECONDS = 15.0
-# Si en banco la secuencia WinHose no dispara la ventana 15 s, cambiar a False aquí.
-WINHOSE_ARMED_IS_ACTIVE_HIGH = True
-OCCUPANCY_INPUT_CODES = ("IN_01_11", "IN_02_10")
+# Tras cambio de modo: no disparar WinHose por flancos espurios al re-leer IN_03.
+WINHOSE_EDGE_GRACE_S = 3.0
+# Presencia zaguán (placa 2 IN10 + placa 3 IN10): único criterio para bloquear entradas P1/P2.
+OCCUPANCY_INPUT_CODES = ("IN_02_10", "IN_03_10")
+ZAGUAN_OCCUPANCY_MODES = frozenset({"horario_autoservicio", "horario_extendido"})
+# Extendido p2→tablet: pendiente app tablet; mientras tanto p2 abre P2 como esclusa.
+EXTENDIDO_TABLET_CALL_ENABLED = False
 DOOR_PULSE_OFF_SECONDS = 5.0
 # Tras el pulso Modbus (~5 s), si el inductivo no marca apertura, volver LED a libre.
 DOOR_LED_REPOSO_AFTER_S = DOOR_PULSE_OFF_SECONDS + 1.5
@@ -71,7 +82,15 @@ INITIAL_LED_BY_MODE: dict[str, dict[PulsadorId, EstadoLed]] = {
         "p3": "libre",
         "p4": "libre",
     },
+    "horario_cerrado": {
+        "p1": "ocupado",
+        "p2": "ocupado",
+        "p3": "libre",
+        "p4": "libre",
+    },
 }
+
+EXTERIOR_PULSADOR: dict[PuertaId, PulsadorId] = {"p1": "p1", "p2": "p2"}
 
 OPPOSITE_DOOR: dict[PuertaId, PuertaId] = {"p1": "p2", "p2": "p1"}
 
@@ -99,6 +118,19 @@ DOOR_OPEN_SENSOR: dict[PuertaId, str] = {
     "p2": "IN_03_04",
 }
 
+DOOR_OPEN_OUTPUT: dict[PuertaId, str] = {
+    "p1": "OUT_02_07",
+    "p2": "OUT_03_07",
+}
+
+# Cierres mecánicos (llave EMICOM) que el interfono apaga temporalmente al abrir.
+DOOR_LOCK_OUTPUTS: dict[PuertaId, tuple[str, ...]] = {
+    "p1": ("OUT_02_01", "OUT_02_02"),
+    "p2": ("OUT_03_01", "OUT_03_02"),
+}
+# panel_rules interfono exterior/interior: pulse_seconds = 2
+DOOR_INTERFONO_PULSE_SECONDS = 2.0
+
 DOOR_OPEN_RULE_PREFIXES = (
     "radares_interior_puerta_",
     "radares_exterior_puerta_",
@@ -125,7 +157,6 @@ _led_states: dict[PulsadorId, EstadoLed] = {
 }
 _current_mode: Optional[str] = None
 _door_was_open: dict[PuertaId, bool] = {"p1": False, "p2": False}
-_p1_user_in_zaguan: bool = False
 _pending_abriendo: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _abriendo_since: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
 # Autoservicio: bloquea la puerta opuesta hasta cierre confirmado (IN_xx_04).
@@ -133,12 +164,39 @@ _door_interlock_active: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _saw_open_while_interlock: dict[PuertaId, bool] = {"p1": False, "p2": False}
 _door_closed_streak: dict[PuertaId, int] = {"p1": 0, "p2": 0}
 
-# WinHose P2 (autoservicio): IN_03_03 secuencia cierre→apertura → ventana 15 s
-_winhose_last_armed: Optional[bool] = None
-_winhose_saw_armed: bool = False
-_winhose_window_until: float = 0.0
-_p2_intermittent: bool = False
-_intermittent_task: Optional[asyncio.Task] = None
+# WinHose: flanco cerrado→abierto (ON→OFF); ventanas e intermitentes independientes por puerta.
+_winhose_last_closed: dict[str, bool] = {}
+_winhose_window_until: dict[PuertaId, float] = {"p1": 0.0, "p2": 0.0}
+_winhose_intermittent_tasks: dict[PuertaId, Optional[asyncio.Task]] = {
+    "p1": None,
+    "p2": None,
+}
+_winhose_mode_changed_at: float = 0.0
+_async_loop: Optional[asyncio.AbstractEventLoop] = None
+ScheduledTask = Union[asyncio.Task[Any], asyncio.Future[Any]]
+
+
+def bind_async_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Registra el loop principal (uvicorn) para tareas desde hilos síncronos."""
+    global _async_loop
+    _async_loop = loop
+
+
+def _schedule_coro(coro: Coroutine[Any, Any, Any]) -> Optional[ScheduledTask]:
+    try:
+        loop = asyncio.get_running_loop()
+        return loop.create_task(coro)
+    except RuntimeError:
+        if _async_loop is not None and _async_loop.is_running():
+            return asyncio.run_coroutine_threadsafe(coro, _async_loop)
+    log.warning("No hay event loop para programar tarea zaguán")
+    return None
+
+
+def _cancel_scheduled(task: Optional[ScheduledTask]) -> None:
+    if task is None:
+        return
+    task.cancel()
 
 # Extendido: p2 exterior → llamada consola (sin Modbus); p3 intermitente hasta COCE/p4.
 _extendido_p2_call_pending: bool = False
@@ -151,18 +209,26 @@ def get_led_states() -> dict[str, EstadoLed]:
 
 
 def get_autoservicio_status() -> dict[str, Any]:
-    """Estado auxiliar ATM (WinHose, intermitente) para depuración/API."""
+    """Estado auxiliar (WinHose, intermitente) para depuración/API."""
     now = time.monotonic()
+    winhose_by_door: dict[str, dict[str, Any]] = {}
+    for door in ("p1", "p2"):
+        until = _winhose_window_until.get(door, 0.0)
+        active = until > 0 and now < until
+        task = _winhose_intermittent_tasks.get(door)
+        winhose_by_door[door] = {
+            "active": active,
+            "remaining_s": max(0.0, until - now) if until else 0.0,
+            "input": WINHOSE_INPUT_BY_DOOR[door],
+            "intermittent_scheduled": task is not None and not task.done(),
+        }
     return {
-        "winhose_window_active": _winhose_window_active(),
-        "winhose_window_remaining_s": max(0.0, _winhose_window_until - now)
-        if _winhose_window_until
-        else 0.0,
-        "p2_intermittent": _p2_intermittent,
-        "winhose_saw_armed": _winhose_saw_armed,
-        "p1_user_in_zaguan": _p1_user_in_zaguan,
-        "winhose_in": WINHOSE_IN_P2,
-        "winhose_armed_is_active_high": WINHOSE_ARMED_IS_ACTIVE_HIGH,
+        "winhose_window_active": _winhose_window_active_for("p2"),
+        "winhose_window_remaining_s": winhose_by_door["p2"]["remaining_s"],
+        "winhose_by_door": winhose_by_door,
+        "winhose_inputs": dict(WINHOSE_INPUT_BY_DOOR),
+        "zaguan_presence_inputs": list(OCCUPANCY_INPUT_CODES),
+        "zaguan_occupied": _zaguan_occupied(),
         "extendido_p2_call_pending": _extendido_p2_call_pending,
         "p3_intermittent": _p3_intermittent,
     }
@@ -227,10 +293,44 @@ def _sync_led_memory() -> None:
         log.debug("Sync memoria zaguan_esp32: %s", e)
 
 
+LED_LIBRE_COLOR = (0, 200, 0)
+LED_OCUPADO_COLOR = (200, 0, 0)
+
+
+def _config_led_estado_fijo(ch: PulsadorId, estado: EstadoLed, color: tuple[int, int, int]) -> None:
+    client = _import_led_client()
+    client.config_estado(
+        {
+            "canal": int(ch[1]),
+            "estado": estado,
+            "color": list(color),
+            "animacion": "fijo",
+        }
+    )
+
+
+def _config_libre_fijo(ch: PulsadorId) -> None:
+    """Libre: verde fijo en todos los modos (sin respiración)."""
+    _config_led_estado_fijo(ch, "libre", LED_LIBRE_COLOR)
+
+
+def _config_cerrado_exterior_ocupado_fijo(ch: PulsadorId) -> None:
+    """Cerrado reposo: rojo fijo en exterior (Excel no usa parpadeo rojo en reposo)."""
+    _config_led_estado_fijo(ch, "ocupado", LED_OCUPADO_COLOR)
+
+
 def _push_leds_to_device(states: dict[PulsadorId, EstadoLed]) -> None:
     client = _import_led_client()
     for ch, est in states.items():
         try:
+            if est == "libre":
+                _config_libre_fijo(ch)
+            elif (
+                _current_mode == "horario_cerrado"
+                and ch in ("p1", "p2")
+                and est == "ocupado"
+            ):
+                _config_cerrado_exterior_ocupado_fijo(ch)
             client.set_estado_canal(ch, est)
         except client.ZaguanLedClientError as e:
             log.warning("LED ESP32 canal %s -> %s: %s", ch, est, e)
@@ -249,16 +349,55 @@ def _record(event_type: str, message: str, payload: dict[str, Any]) -> None:
         pass
 
 
+def _winhose_doors_for_mode(mode: Optional[str]) -> tuple[PuertaId, ...]:
+    if mode == "horario_autoservicio":
+        return ("p2",)
+    if mode == "horario_cerrado":
+        return ("p1", "p2")
+    return ()
+
+
+def _seed_winhose_baseline() -> None:
+    """Estado actual de llaves al entrar en modo (evita flanco falso tras reset)."""
+    if _current_mode not in WINHOSE_MODES:
+        return
+    for door in _winhose_doors_for_mode(_current_mode):
+        code = WINHOSE_INPUT_BY_DOOR[door]
+        try:
+            _winhose_last_closed[code] = bool(_read_input(code))
+        except Exception as e:  # noqa: BLE001
+            log.debug("WinHose seed %s: %s", code, e)
+
+
+def _winhose_window_active_for(door: PuertaId) -> bool:
+    until = _winhose_window_until.get(door, 0.0)
+    return until > 0 and time.monotonic() < until
+
+
+def _any_winhose_window_active() -> bool:
+    return any(_winhose_window_active_for(d) for d in ("p1", "p2"))
+
+
+def _stop_winhose_intermittent(door: PuertaId) -> None:
+    _cancel_scheduled(_winhose_intermittent_tasks.get(door))
+    _winhose_intermittent_tasks[door] = None
+
+
+def _stop_all_winhose_intermittent() -> None:
+    for door in ("p1", "p2"):
+        _stop_winhose_intermittent(door)
+
+
+def _clear_winhose_window(door: PuertaId) -> None:
+    _winhose_window_until[door] = 0.0
+    _stop_winhose_intermittent(door)
+
+
 def _reset_winhose_state() -> None:
-    global _winhose_last_armed, _winhose_saw_armed, _winhose_window_until, _p2_intermittent
-    global _intermittent_task
-    _winhose_last_armed = None
-    _winhose_saw_armed = False
-    _winhose_window_until = 0.0
-    _p2_intermittent = False
-    if _intermittent_task and not _intermittent_task.done():
-        _intermittent_task.cancel()
-    _intermittent_task = None
+    _winhose_last_closed.clear()
+    for door in ("p1", "p2"):
+        _winhose_window_until[door] = 0.0
+    _stop_all_winhose_intermittent()
 
 
 def _reset_extendido_state() -> None:
@@ -306,10 +445,7 @@ def _clear_extendido_p2_call() -> None:
         _led_states["p3"] = "libre"
         _sync_led_memory()
         if LED_DEVICE_SYNC:
-            try:
-                _import_led_client().set_estado_canal("p3", "libre")
-            except Exception as e:  # noqa: BLE001
-                log.debug("LED p3 reposo tras llamada consola: %s", e)
+            _push_leds_to_device({"p3": "libre"})
 
 
 def _start_extendido_p2_call() -> None:
@@ -331,119 +467,183 @@ def _start_extendido_p2_call() -> None:
         pass
 
 
-def _winhose_window_active() -> bool:
-    return _winhose_window_until > 0 and time.monotonic() < _winhose_window_until
-
-
-def _input_means_armed(raw_active: bool) -> bool:
-    return raw_active if WINHOSE_ARMED_IS_ACTIVE_HIGH else not raw_active
-
-
 def _autoservicio_reposo() -> None:
     """Excel ATM reposo: P1 verde, P2 ext rojo, P1 int y P2 int verde."""
-    _stop_p2_intermittent()
+    _stop_all_winhose_intermittent()
     _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_autoservicio"]))
 
 
-def _stop_p2_intermittent() -> None:
-    global _p2_intermittent, _intermittent_task
-    _p2_intermittent = False
-    if _intermittent_task and not _intermittent_task.done():
-        _intermittent_task.cancel()
-    _intermittent_task = None
+def _cerrado_reposo() -> None:
+    """Excel cerrado reposo: exteriores rojo, interiores verde."""
+    _stop_all_winhose_intermittent()
+    _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_cerrado"]))
 
 
-async def _p2_intermittent_loop(until: float) -> None:
-    """Simula INTERMITENTE Excel (verde parpadeante) en p2 durante ventana WinHose."""
+def _mode_reposo() -> None:
+    if _current_mode == "horario_autoservicio":
+        _autoservicio_reposo()
+    elif _current_mode == "horario_cerrado":
+        _cerrado_reposo()
+
+
+async def _winhose_intermittent_loop(door: PuertaId, until: float) -> None:
+    """INTERMITENTE Excel (verde) en exterior solo durante ventana WinHose activa."""
+    channel = EXTERIOR_PULSADOR[door]
     client = _import_led_client()
     try:
-        while time.monotonic() < until:
+        while (
+            time.monotonic() < until
+            and _winhose_window_active_for(door)
+            and _current_mode in WINHOSE_MODES
+        ):
             try:
-                await asyncio.to_thread(
-                    client.set_estado_canal,
-                    "p2",
-                    "libre",
-                )
+                await asyncio.to_thread(client.set_estado_canal, channel, "libre")
                 await asyncio.to_thread(
                     client.config_flash,
                     {"color": [0, 200, 0], "n_flashes": 2, "duracion_ms": 350},
                 )
             except Exception as e:  # noqa: BLE001
-                log.debug("Flash intermitente p2: %s", e)
+                log.debug("Flash intermitente %s: %s", channel, e)
             await asyncio.sleep(0.9)
     except asyncio.CancelledError:
         pass
+    finally:
+        if _current_mode == "horario_cerrado" and not _winhose_window_active_for(door):
+            try:
+                await asyncio.to_thread(
+                    _config_cerrado_exterior_ocupado_fijo, channel
+                )
+                await asyncio.to_thread(
+                    client.set_estado_canal, channel, "ocupado"
+                )
+            except Exception as e:  # noqa: BLE001
+                log.debug("Reposo cerrado tras intermitente %s: %s", channel, e)
 
 
-def _start_winhose_window() -> None:
-    """Excel: EN ESPERA DE APERTURA TRAS PULSACIÓN — p2 ext intermitente, resto verde."""
-    global _winhose_window_until, _p2_intermittent, _intermittent_task
-    _winhose_window_until = time.monotonic() + WINHOSE_WINDOW_SECONDS
-    _p2_intermittent = True
-    _apply_led_map(
-        {
-            "p1": "libre",
-            "p2": "libre",
-            "p3": "libre",
-            "p4": "libre",
-        }
-    )
+def _apply_winhose_window_leds(door: PuertaId) -> None:
+    """LEDs de fondo durante ventana WinHose (el exterior parpadea en la tarea async)."""
+    if _current_mode == "horario_autoservicio":
+        _apply_led_map(
+            {"p1": "libre", "p2": "libre", "p3": "libre", "p4": "libre"}
+        )
+    elif _current_mode == "horario_cerrado":
+        states = dict(INITIAL_LED_BY_MODE["horario_cerrado"])
+        states[EXTERIOR_PULSADOR[door]] = "libre"
+        _apply_led_map(states)
+
+
+def _start_winhose_window(door: PuertaId) -> None:
+    """Flanco ON→OFF en llave WinHose → ventana 15 s + exterior intermitente."""
+    until = time.monotonic() + WINHOSE_WINDOW_SECONDS
+    _winhose_window_until[door] = until
+    _stop_winhose_intermittent(door)
+    _apply_winhose_window_leds(door)
     _record(
         "zaguan_winhose_window",
-        f"Ventana WinHose P2 ({WINHOSE_WINDOW_SECONDS}s)",
-        {"until_s": WINHOSE_WINDOW_SECONDS, "in": WINHOSE_IN_P2},
+        f"Ventana WinHose {door} ({WINHOSE_WINDOW_SECONDS}s)",
+        {
+            "door": door,
+            "until_s": WINHOSE_WINDOW_SECONDS,
+            "input": WINHOSE_INPUT_BY_DOOR[door],
+            "mode": _current_mode,
+        },
     )
-    log.info("WinHose P2: ventana %ss — p2 intermitente", WINHOSE_WINDOW_SECONDS)
-    try:
-        loop = asyncio.get_running_loop()
-        _intermittent_task = loop.create_task(
-            _p2_intermittent_loop(_winhose_window_until)
+    log.info(
+        "WinHose %s: ventana %ss — %s intermitente",
+        door,
+        WINHOSE_WINDOW_SECONDS,
+        EXTERIOR_PULSADOR[door],
+    )
+    _winhose_intermittent_tasks[door] = _schedule_coro(
+        _winhose_intermittent_loop(door, until)
+    )
+
+
+def trigger_winhose_window(door: PuertaId) -> tuple[bool, str]:
+    """Abre ventana WinHose 15 s (p. ej. emulación llave). Ignora grace de cambio de modo."""
+    if _current_mode not in WINHOSE_MODES:
+        return False, f"Modo {_current_mode!r} sin WinHose"
+    if door not in _winhose_doors_for_mode(_current_mode):
+        return False, f"WinHose de {door} no aplica en {_current_mode}"
+    code = WINHOSE_INPUT_BY_DOOR[door]
+    _winhose_last_closed[code] = True
+    _start_winhose_window(door)
+    _winhose_last_closed[code] = False
+    if not _winhose_window_active_for(door):
+        return False, "Ventana WinHose no arrancó"
+    if _winhose_intermittent_tasks.get(door) is None:
+        return False, "Intermitente WinHose no programado (reinicia backend)"
+    return True, ""
+
+
+def _sync_winhose_expirations() -> None:
+    """Al expirar ventanas WinHose, restaurar reposo si no hay maniobra en curso."""
+    if _current_mode not in WINHOSE_MODES:
+        return
+    expired_any = False
+    for door in _winhose_doors_for_mode(_current_mode):
+        if _winhose_window_until.get(door, 0.0) <= 0:
+            continue
+        if _winhose_window_active_for(door):
+            continue
+        _winhose_window_until[door] = 0.0
+        _stop_winhose_intermittent(door)
+        expired_any = True
+        _record(
+            "zaguan_winhose_expired",
+            f"Ventana WinHose {door} expirada",
+            {"door": door, "mode": _current_mode},
         )
-    except RuntimeError:
-        pass
+    if not expired_any:
+        return
+    if _door_interlock_active.get("p1") or _door_interlock_active.get("p2"):
+        if _current_mode == "horario_autoservicio":
+            _sync_autoservicio_interlock_leds()
+        elif _current_mode == "horario_cerrado":
+            _sync_cerrado_interlock_leds()
+        return
+    if _any_winhose_window_active():
+        for wh_door in _winhose_doors_for_mode(_current_mode):
+            if _winhose_window_active_for(wh_door):
+                _apply_winhose_window_leds(wh_door)
+        return
+    _mode_reposo()
 
 
 def poll_winhose() -> None:
     """
-    Detecta maniobra WinHose en P2 vía IN_03_03 (inductivo llave echada).
-    Secuencia por defecto: entrada en «armado/cierre» y luego «desarmado/apertura» → 15 s.
-    Ajustable con WINHOSE_ARMED_IS_ACTIVE_HIGH en código si en banco es al revés.
+    WinHose: cerrado=ON, abierto=OFF. Flanco ON→OFF → ventana 15 s por puerta.
+    Autoservicio: solo P2 (IN_03_03). Cerrado: P1 (IN_02_03) y P2 (IN_03_03).
     """
-    global _winhose_last_armed, _winhose_saw_armed, _winhose_window_until
-
-    if not ORCHESTRATOR_ENABLED or _current_mode != "horario_autoservicio":
+    if not ORCHESTRATOR_ENABLED or _current_mode not in WINHOSE_MODES:
         return
 
-    try:
-        raw = _read_input(WINHOSE_IN_P2)
-    except Exception as e:  # noqa: BLE001
-        log.debug("WinHose lectura %s: %s", WINHOSE_IN_P2, e)
-        return
+    in_grace = (time.monotonic() - _winhose_mode_changed_at) < WINHOSE_EDGE_GRACE_S
 
-    armed = _input_means_armed(raw)
+    for door in _winhose_doors_for_mode(_current_mode):
+        code = WINHOSE_INPUT_BY_DOOR[door]
+        try:
+            closed = _read_input(code)
+        except Exception as e:  # noqa: BLE001
+            log.debug("WinHose lectura %s: %s", code, e)
+            continue
 
-    if _winhose_last_armed is None:
-        _winhose_last_armed = armed
-        return
+        last = _winhose_last_closed.get(code)
+        if last is None:
+            _winhose_last_closed[code] = closed
+            continue
 
-    if armed and not _winhose_last_armed:
-        _winhose_saw_armed = True
-        log.debug("WinHose: flanco armado/cierre (%s=%s)", WINHOSE_IN_P2, raw)
+        if not in_grace and last and not closed:
+            log.info("WinHose: flanco cerrado→abierto en %s (%s)", code, door)
+            _start_winhose_window(door)
 
-    if not armed and _winhose_last_armed and _winhose_saw_armed:
-        _winhose_saw_armed = False
-        _start_winhose_window()
-        log.info("WinHose: maniobra completa — ventana apertura P2 exterior")
+        _winhose_last_closed[code] = closed
 
-    _winhose_last_armed = armed
-
-    if _winhose_window_until > 0 and not _winhose_window_active():
-        _winhose_window_until = 0.0
-        _autoservicio_reposo()
-        _record("zaguan_winhose_expired", "Ventana WinHose P2 expirada", {})
+    _sync_winhose_expirations()
 
 
 def _zaguan_occupied() -> bool:
+    """True si IN_02_10 o IN_03_10 detectan presencia en el zaguán."""
     for code in OCCUPANCY_INPUT_CODES:
         try:
             if _read_input(code):
@@ -451,6 +651,17 @@ def _zaguan_occupied() -> bool:
         except Exception:  # noqa: BLE001
             continue
     return False
+
+
+def _exterior_entry_blocked_by_presence(pulsador: PulsadorId) -> tuple[bool, str]:
+    """Bloqueo por presencia física: solo entradas exteriores P1/P2 en modos con sensor."""
+    if _current_mode not in ZAGUAN_OCCUPANCY_MODES:
+        return False, ""
+    if pulsador not in ("p1", "p2"):
+        return False, ""
+    if not _zaguan_occupied():
+        return False, ""
+    return True, "Zaguán ocupado (IN_02_10 / IN_03_10)"
 
 
 def _door_is_open(door: PuertaId) -> bool:
@@ -477,21 +688,67 @@ def _p1_blocks_p2_autoservicio() -> bool:
     )
 
 
-def _can_open_p1_autoservicio() -> tuple[bool, str]:
-    if _zaguan_occupied():
-        return False, "Autoservicio: zaguán ocupado"
+def _can_open_p1_autoservicio(pulsador: PulsadorId) -> tuple[bool, str]:
+    blocked, reason = _exterior_entry_blocked_by_presence(pulsador)
+    if blocked:
+        return False, f"Autoservicio: {reason}"
     if _p2_blocks_p1_autoservicio():
         return False, "Autoservicio: P2 debe estar totalmente cerrada"
     return True, ""
 
 
 def _can_open_p2_autoservicio(pulsador: PulsadorId) -> tuple[bool, str]:
+    blocked, reason = _exterior_entry_blocked_by_presence(pulsador)
+    if blocked:
+        return False, f"Autoservicio: {reason}"
     if _p1_blocks_p2_autoservicio():
         return False, "Autoservicio: P1 debe estar totalmente cerrada"
-    if pulsador == "p2":
-        if not _winhose_window_active():
-            return False, "Autoservicio: P2 exterior solo tras maniobra WinHose (15 s)"
+    if pulsador == "p2" and not _winhose_window_active_for("p2"):
+        return False, "Autoservicio: P2 exterior solo tras maniobra WinHose (15 s)"
     return True, ""
+
+
+def _can_open_cerrado(pulsador: PulsadorId) -> tuple[bool, str]:
+    door = PULSADOR_TO_DOOR[pulsador]
+    if pulsador in ("p1", "p2") and not _winhose_window_active_for(door):
+        return False, f"Cerrado: {door} exterior solo tras maniobra WinHose (15 s)"
+    ok, reason = _can_open_in_interlock(door)
+    if not ok:
+        return False, f"Cerrado: {reason}"
+    return True, ""
+
+
+def _cerrado_exterior_uses_direct_pulse(pulsador: PulsadorId) -> bool:
+    """
+    En cerrado, interfono exterior tiene blocked_if_active IN_01_05 (el propio modo).
+    El orquestador ya validó WinHose → pulso directo (apertura + cierres mecánicos).
+    """
+    return _current_mode == "horario_cerrado" and pulsador in ("p1", "p2")
+
+
+async def _door_pulse_with_locks(door: PuertaId, *, restore_locks: bool) -> None:
+    """Replica interfono: libera cierres, pulsa apertura, restaura cierres en cerrado."""
+    panel = _import_panel()
+    open_code = DOOR_OPEN_OUTPUT[door]
+    for lock_code in DOOR_LOCK_OUTPUTS[door]:
+        await asyncio.to_thread(panel.api_v1_set_output_by_code, lock_code, False)
+    await asyncio.to_thread(panel.api_v1_set_output_by_code, open_code, True)
+    await asyncio.sleep(DOOR_INTERFONO_PULSE_SECONDS)
+    await asyncio.to_thread(panel.api_v1_set_output_by_code, open_code, False)
+    if restore_locks:
+        for lock_code in DOOR_LOCK_OUTPUTS[door]:
+            await asyncio.to_thread(panel.api_v1_set_output_by_code, lock_code, True)
+
+
+async def _execute_cerrado_exterior_pulse(door: PuertaId) -> dict[str, Any]:
+    await _door_pulse_with_locks(door, restore_locks=True)
+    return {
+        "executed": True,
+        "direct_output": DOOR_OPEN_OUTPUT[door],
+        "locks_released": list(DOOR_LOCK_OUTPUTS[door]),
+        "pulse_seconds": DOOR_INTERFONO_PULSE_SECONDS,
+        "reason": "cerrado_exterior_winhose",
+    }
 
 
 def _opposite_door_blocks(door: PuertaId) -> bool:
@@ -513,9 +770,10 @@ def _can_open_in_esclusa(door: PuertaId) -> tuple[bool, str]:
     return True, ""
 
 
-def _can_open_p1_extendido() -> tuple[bool, str]:
-    if _zaguan_occupied():
-        return False, "Extendido: zaguán ocupado"
+def _can_open_p1_extendido(pulsador: PulsadorId) -> tuple[bool, str]:
+    blocked, reason = _exterior_entry_blocked_by_presence(pulsador)
+    if blocked:
+        return False, reason
     ok, reason = _can_open_in_interlock("p1")
     if not ok:
         return False, f"Extendido: {reason}"
@@ -545,7 +803,11 @@ def _sync_interlock_leds() -> None:
     """Esclusa/extendido: reposo (4× libre) solo cuando ambas puertas están cerradas."""
     if _current_mode not in INTERLOCK_MODES:
         return
-    if _current_mode == "horario_extendido" and _extendido_p2_call_pending:
+    if (
+        EXTENDIDO_TABLET_CALL_ENABLED
+        and _current_mode == "horario_extendido"
+        and _extendido_p2_call_pending
+    ):
         return
     active = _esclusa_active_door()
     if active is None:
@@ -561,12 +823,7 @@ def _sync_esclusa_leds() -> None:
 
 
 def _sync_autoservicio_interlock_leds() -> None:
-    """
-    Mantiene el par P1 en ocupado mientras P2 abre o está abierta (y viceversa).
-    No pisa el estado «usuario en zaguán» tras cerrar P1 si P2 no interviene.
-    """
-    if _p1_user_in_zaguan and not _p2_blocks_p1_autoservicio():
-        return
+    """Interbloqueo activo: par de la puerta en maniobra, opuesto ocupado."""
     if _p2_blocks_p1_autoservicio():
         _apply_led_map(
             {
@@ -587,12 +844,44 @@ def _sync_autoservicio_interlock_leds() -> None:
         )
 
 
+def _sync_cerrado_interlock_leds() -> None:
+    """Interbloqueo cerrado: par activo abriendo, opuesto ocupado."""
+    if _p2_blocks_p1_autoservicio():
+        _apply_led_map(
+            {
+                "p1": "ocupado",
+                "p3": "ocupado",
+                "p2": "abriendo",
+                "p4": "abriendo",
+            }
+        )
+    elif _p1_blocks_p2_autoservicio():
+        _apply_led_map(
+            {
+                "p1": "abriendo",
+                "p3": "abriendo",
+                "p2": "ocupado",
+                "p4": "ocupado",
+            }
+        )
+
+
+def _apply_strict_interlock_abriendo(door: PuertaId) -> None:
+    other = OPPOSITE_DOOR[door]
+    states: dict[PulsadorId, EstadoLed] = {}
+    for ch in DOOR_TO_LED_CHANNELS[door]:
+        states[ch] = "abriendo"
+    for ch in DOOR_TO_LED_CHANNELS[other]:
+        states[ch] = "ocupado"
+    _apply_led_map(states)
+
+
 def on_mode_changed(mode: Optional[str]) -> None:
     if not ORCHESTRATOR_ENABLED:
         return
-    global _current_mode, _p1_user_in_zaguan
+    global _current_mode, _winhose_mode_changed_at
     _current_mode = mode
-    _p1_user_in_zaguan = False
+    _winhose_mode_changed_at = time.monotonic()
     _pending_abriendo["p1"] = False
     _pending_abriendo["p2"] = False
     _abriendo_since["p1"] = 0.0
@@ -614,6 +903,8 @@ def on_mode_changed(mode: Optional[str]) -> None:
     if not initial:
         return
     _apply_led_map(initial)
+    if mode in WINHOSE_MODES:
+        _seed_winhose_baseline()
     _record(
         "zaguan_mode_led_init",
         f"LED inicial modo {mode}",
@@ -637,7 +928,8 @@ def on_rule_executed(rule_key: str, result: dict[str, Any]) -> None:
     if _current_mode == "horario_autoservicio":
         if door == "p2":
             return
-        ok, _ = _can_open_p1_autoservicio()
+        pulsador_hint: PulsadorId = "p3" if "interior" in rule_key else "p1"
+        ok, _ = _can_open_p1_autoservicio(pulsador_hint)
         if not ok:
             return
     elif _current_mode == "horario_esclusa":
@@ -645,46 +937,41 @@ def on_rule_executed(rule_key: str, result: dict[str, Any]) -> None:
         if not ok:
             return
     elif _current_mode == "horario_extendido":
-        if door == "p1" and _zaguan_occupied():
-            return
+        if door == "p1":
+            pulsador_hint = "p3" if "interior" in rule_key else "p1"
+            ok, _ = _can_open_p1_extendido(pulsador_hint)
+            if not ok:
+                return
+        elif door == "p2" and "interior" not in rule_key:
+            blocked, _ = _exterior_entry_blocked_by_presence("p2")
+            if blocked:
+                return
         ok, _ = _can_open_in_interlock(door)
         if not ok:
             return
-        if door == "p2":
+        if EXTENDIDO_TABLET_CALL_ENABLED and door == "p2":
             _clear_extendido_p2_call()
+    elif _current_mode == "horario_cerrado":
+        ok, _ = _can_open_in_interlock(door)
+        if not ok:
+            return
 
     _set_door_abriendo(door, source=f"rule:{rule_key}")
 
 
 def _set_door_abriendo(door: PuertaId, *, source: str) -> None:
-    global _winhose_window_until
-
     _pending_abriendo[door] = True
     _abriendo_since[door] = time.monotonic()
-    if _current_mode == "horario_autoservicio":
+    if _current_mode in STRICT_INTERLOCK_MODES:
         _door_interlock_active[door] = True
-        if door == "p1":
-            _apply_led_map(
-                {
-                    "p1": "abriendo",
-                    "p3": "abriendo",
-                    "p2": "ocupado",
-                    "p4": "ocupado",
-                }
-            )
-        else:
-            _stop_p2_intermittent()
-            _winhose_window_until = 0.0
-            _apply_led_map(
-                {
-                    "p1": "ocupado",
-                    "p3": "ocupado",
-                    "p2": "abriendo",
-                    "p4": "abriendo",
-                }
-            )
+        _clear_winhose_window(door)
+        _apply_strict_interlock_abriendo(door)
     elif _current_mode in INTERLOCK_MODES:
-        if door == "p2" and _current_mode == "horario_extendido":
+        if (
+            EXTENDIDO_TABLET_CALL_ENABLED
+            and door == "p2"
+            and _current_mode == "horario_extendido"
+        ):
             _clear_extendido_p2_call()
         _apply_esclusa_led_for_door(door)
     else:
@@ -698,17 +985,8 @@ def _set_door_abriendo(door: PuertaId, *, source: str) -> None:
 
 
 def _autoservicio_post_close_p1() -> None:
-    if _p1_user_in_zaguan:
-        _apply_led_map(
-            {
-                "p1": "ocupado",
-                "p2": "ocupado",
-                "p3": "libre",
-                "p4": "libre",
-            }
-        )
-    else:
-        _autoservicio_reposo()
+    """Tras cerrar P1: LEDs de reposo (p1/p3 libre; Excel no deja P1 en ocupado)."""
+    _autoservicio_reposo()
 
 
 def _automatico_post_close(door: PuertaId) -> None:
@@ -755,20 +1033,30 @@ def _release_autoservicio_door(door: PuertaId) -> None:
     _door_closed_streak[door] = 0
 
 
-def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
+def _strict_interlock_post_close(door: PuertaId) -> None:
     if _current_mode == "horario_autoservicio":
-        if not (
-            _door_interlock_active.get(door)
-            or _pending_abriendo.get(door)
-        ):
-            return
-        _release_autoservicio_door(door)
         if door == "p1":
             _autoservicio_post_close_p1()
         elif _p2_blocks_p1_autoservicio():
             _sync_autoservicio_interlock_leds()
         else:
             _autoservicio_reposo()
+    elif _current_mode == "horario_cerrado":
+        if _p2_blocks_p1_autoservicio() or _p1_blocks_p2_autoservicio():
+            _sync_cerrado_interlock_leds()
+        else:
+            _cerrado_reposo()
+
+
+def _on_door_closed(door: PuertaId, *, source: str = "sensor") -> None:
+    if _current_mode in STRICT_INTERLOCK_MODES:
+        if not (
+            _door_interlock_active.get(door)
+            or _pending_abriendo.get(door)
+        ):
+            return
+        _release_autoservicio_door(door)
+        _strict_interlock_post_close(door)
         _record(
             "zaguan_door_closed",
             f"Puerta {door} cerrada — LED actualizado ({source})",
@@ -798,7 +1086,7 @@ def poll_door_sensors() -> None:
     if not ORCHESTRATOR_ENABLED or _current_mode not in SUPPORTED_MODES:
         return
 
-    if _current_mode == "horario_autoservicio":
+    if _current_mode in WINHOSE_MODES:
         poll_winhose()
 
     now = time.monotonic()
@@ -812,7 +1100,7 @@ def poll_door_sensors() -> None:
         was_open = _door_was_open[door]
         age_s = now - _abriendo_since[door] if _abriendo_since[door] > 0 else 0.0
 
-        if _current_mode == "horario_autoservicio" and _door_interlock_active.get(door):
+        if _current_mode in STRICT_INTERLOCK_MODES and _door_interlock_active.get(door):
             _try_autoservicio_close_confirm(
                 door, is_open=is_open, was_open=was_open, age_s=age_s
             )
@@ -825,7 +1113,7 @@ def poll_door_sensors() -> None:
         elif was_open and not is_open:
             _on_door_closed(door, source="sensor_edge")
         elif (
-            _current_mode != "horario_autoservicio"
+            _current_mode not in STRICT_INTERLOCK_MODES
             and _pending_abriendo.get(door)
             and not is_open
             and age_s >= DOOR_LED_REPOSO_AFTER_S
@@ -838,18 +1126,29 @@ def poll_door_sensors() -> None:
         _sync_interlock_leds()
     elif _current_mode == "horario_autoservicio":
         _sync_autoservicio_interlock_leds()
+    elif _current_mode == "horario_cerrado":
+        _sync_cerrado_interlock_leds()
+
+
+def _pulsador_blocked_by_led(pulsador: PulsadorId) -> bool:
+    if _led_states.get(pulsador) != "ocupado":
+        return False
+    # Autoservicio: p1/p2 en reposo pueden estar en rojo (cierre P2) sin bloquear pulsación.
+    if _current_mode == "horario_autoservicio" and pulsador in ("p1", "p2"):
+        return False
+    return True
 
 
 def _pulsador_allowed_in_mode(pulsador: PulsadorId) -> tuple[bool, str]:
     if _current_mode not in SUPPORTED_MODES:
         return False, f"Modo {_current_mode!r} sin orquestación zaguán"
 
-    if _led_states.get(pulsador) == "ocupado":
+    if _pulsador_blocked_by_led(pulsador):
         return False, f"Pulsador {pulsador} bloqueado (LED ocupado)"
 
     if _current_mode == "horario_autoservicio":
         if pulsador in ("p1", "p3"):
-            return _can_open_p1_autoservicio()
+            return _can_open_p1_autoservicio(pulsador)
         if pulsador in ("p2", "p4"):
             return _can_open_p2_autoservicio(pulsador)
 
@@ -858,17 +1157,20 @@ def _pulsador_allowed_in_mode(pulsador: PulsadorId) -> tuple[bool, str]:
         return _can_open_in_esclusa(door)
 
     if _current_mode == "horario_extendido":
-        if pulsador == "p1":
-            return _can_open_p1_extendido()
-        if pulsador == "p3":
-            ok, reason = _can_open_in_interlock("p1")
-            return (ok, f"Extendido: {reason}" if reason else "")
+        if pulsador in ("p1", "p3"):
+            return _can_open_p1_extendido(pulsador)
         if pulsador == "p2":
+            blocked, reason = _exterior_entry_blocked_by_presence(pulsador)
+            if blocked:
+                return False, f"Extendido: {reason}"
             ok, reason = _can_open_in_interlock("p2")
             return (ok, f"Extendido: {reason}" if reason else "")
         if pulsador == "p4":
             ok, reason = _can_open_in_interlock("p2")
             return (ok, f"Extendido: {reason}" if reason else "")
+
+    if _current_mode == "horario_cerrado":
+        return _can_open_cerrado(pulsador)
 
     return True, ""
 
@@ -889,19 +1191,14 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
     door = PULSADOR_TO_DOOR[pulsador]
     rule_key = PULSADOR_TO_INTERFONO_RULE[pulsador]
 
-    global _p1_user_in_zaguan
-    if _current_mode == "horario_autoservicio":
-        if pulsador == "p1":
-            _p1_user_in_zaguan = True
-        elif pulsador == "p3":
-            _p1_user_in_zaguan = False
+    if _current_mode in WINHOSE_MODES and pulsador in ("p1", "p2"):
+        _clear_winhose_window(PULSADOR_TO_DOOR[pulsador])
 
-    if pulsador == "p2" and _current_mode == "horario_autoservicio":
-        _stop_p2_intermittent()
-        global _winhose_window_until
-        _winhose_window_until = 0.0
-
-    if _current_mode == "horario_extendido" and pulsador == "p2":
+    if (
+        EXTENDIDO_TABLET_CALL_ENABLED
+        and _current_mode == "horario_extendido"
+        and pulsador == "p2"
+    ):
         _start_extendido_p2_call()
         return {
             "ok": True,
@@ -912,7 +1209,11 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
             "modbus_ok": False,
         }
 
-    if _current_mode == "horario_extendido" and pulsador == "p4":
+    if (
+        EXTENDIDO_TABLET_CALL_ENABLED
+        and _current_mode == "horario_extendido"
+        and pulsador == "p4"
+    ):
         _clear_extendido_p2_call()
 
     _set_door_abriendo(door, source=f"pulsacion:{pulsador}")
@@ -922,23 +1223,37 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
     if MODBUS_ON_PULSACION:
         panel = _import_panel()
         try:
-            modbus_detail = await asyncio.to_thread(
-                panel.api_v1_execute_rule_for_tablet,
-                rule_key,
-            )
-            modbus_ok = bool(modbus_detail.get("executed"))
-            if not modbus_ok:
-                log.warning(
-                    "Regla interfono no ejecutada para %s: %s",
+            if _cerrado_exterior_uses_direct_pulse(pulsador):
+                modbus_detail = await _execute_cerrado_exterior_pulse(door)
+                modbus_ok = True
+                log.info(
+                    "Pulsación %s cerrado: apertura %s + cierres %s",
                     pulsador,
-                    modbus_detail.get("reason"),
+                    modbus_detail.get("direct_output"),
+                    modbus_detail.get("locks_released"),
                 )
+            else:
+                modbus_detail = await asyncio.to_thread(
+                    panel.api_v1_execute_rule_for_tablet,
+                    rule_key,
+                )
+                modbus_ok = bool(modbus_detail.get("executed"))
+                if not modbus_ok:
+                    log.warning(
+                        "Regla interfono no ejecutada para %s: %s",
+                        pulsador,
+                        modbus_detail.get("reason"),
+                    )
         except Exception as e:  # noqa: BLE001
             modbus_ok = False
             modbus_detail = str(e)
             log.warning("Error Modbus pulsación %s: %s", pulsador, e)
 
-        if modbus_ok and DOOR_PULSE_OFF_SECONDS > 0:
+        if (
+            modbus_ok
+            and DOOR_PULSE_OFF_SECONDS > 0
+            and not _cerrado_exterior_uses_direct_pulse(pulsador)
+        ):
             asyncio.create_task(_schedule_door_output_off(door, rule_key, DOOR_PULSE_OFF_SECONDS))
 
     _record(
@@ -966,7 +1281,7 @@ async def handle_pulsacion(pulsador: PulsadorId, ts: int) -> dict[str, Any]:
 async def _schedule_door_output_off(door: PuertaId, rule_key: str, seconds: float) -> None:
     await asyncio.sleep(seconds)
     panel = _import_panel()
-    out_code = "OUT_02_07" if door == "p1" else "OUT_03_07"
+    out_code = DOOR_OPEN_OUTPUT[door]
     try:
         await asyncio.to_thread(panel.api_v1_set_output_by_code, out_code, False)
     except Exception as e:  # noqa: BLE001
@@ -991,11 +1306,13 @@ def bootstrap_from_panel() -> None:
             pass
     if _current_mode in INTERLOCK_MODES:
         _sync_interlock_leds()
-    elif _current_mode == "horario_autoservicio":
-        _sync_autoservicio_interlock_leds()
-        try:
-            raw = _read_input(WINHOSE_IN_P2)
-            global _winhose_last_armed
-            _winhose_last_armed = _input_means_armed(raw)
-        except Exception:  # noqa: BLE001
-            pass
+    elif _current_mode in STRICT_INTERLOCK_MODES:
+        if _current_mode == "horario_autoservicio":
+            _sync_autoservicio_interlock_leds()
+        else:
+            _sync_cerrado_interlock_leds()
+        for code in WINHOSE_INPUT_BY_DOOR.values():
+            try:
+                _winhose_last_closed[code] = _read_input(code)
+            except Exception:  # noqa: BLE001
+                pass
