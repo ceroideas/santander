@@ -83,10 +83,10 @@ INITIAL_LED_BY_MODE: dict[str, dict[PulsadorId, EstadoLed]] = {
         "p4": "libre",
     },
     "horario_cerrado": {
-        "p1": "ocupado",
-        "p2": "ocupado",
-        "p3": "libre",
-        "p4": "libre",
+        "p1": "apagado",
+        "p2": "apagado",
+        "p3": "apagado",
+        "p4": "apagado",
     },
 }
 
@@ -474,7 +474,7 @@ def _autoservicio_reposo() -> None:
 
 
 def _cerrado_reposo() -> None:
-    """Excel cerrado reposo: exteriores rojo, interiores verde."""
+    """Cerrado reposo: 4× apagado (SAIMA / cliente). WinHose y maniobras usan otros estados."""
     _stop_all_winhose_intermittent()
     _apply_led_map(dict(INITIAL_LED_BY_MODE["horario_cerrado"]))
 
@@ -508,16 +508,19 @@ async def _winhose_intermittent_loop(door: PuertaId, until: float) -> None:
     except asyncio.CancelledError:
         pass
     finally:
-        if _current_mode == "horario_cerrado" and not _winhose_window_active_for(door):
-            try:
-                await asyncio.to_thread(
-                    _config_cerrado_exterior_ocupado_fijo, channel
-                )
-                await asyncio.to_thread(
-                    client.set_estado_canal, channel, "ocupado"
-                )
-            except Exception as e:  # noqa: BLE001
-                log.debug("Reposo cerrado tras intermitente %s: %s", channel, e)
+        if _current_mode != "horario_cerrado" or _winhose_window_active_for(door):
+            return
+        if (
+            _door_interlock_active.get("p1")
+            or _door_interlock_active.get("p2")
+            or _pending_abriendo.get("p1")
+            or _pending_abriendo.get("p2")
+        ):
+            return
+        try:
+            await asyncio.to_thread(_cerrado_reposo)
+        except Exception as e:  # noqa: BLE001
+            log.debug("Reposo cerrado (apagado) tras intermitente: %s", e)
 
 
 def _apply_winhose_window_leds(door: PuertaId) -> None:
@@ -527,9 +530,10 @@ def _apply_winhose_window_leds(door: PuertaId) -> None:
             {"p1": "libre", "p2": "libre", "p3": "libre", "p4": "libre"}
         )
     elif _current_mode == "horario_cerrado":
-        states = dict(INITIAL_LED_BY_MODE["horario_cerrado"])
-        states[EXTERIOR_PULSADOR[door]] = "libre"
-        _apply_led_map(states)
+        # Reposo apagado; solo el exterior WinHose pasa a libre (el loop hace el parpadeo verde).
+        _push_leds_to_device({EXTERIOR_PULSADOR[door]: "libre"})
+        _led_states[EXTERIOR_PULSADOR[door]] = "libre"
+        _sync_led_memory()
 
 
 def _start_winhose_window(door: PuertaId) -> None:
