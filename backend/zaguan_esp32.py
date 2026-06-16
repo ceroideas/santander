@@ -189,7 +189,11 @@ async def get_estado_zaguan():
         from app.services import zaguan_orchestrator as zo
 
         extra = zo.get_autoservicio_status()
-        if extra.get("winhose_window_active") or extra.get("p2_intermittent"):
+        if (
+            any((extra.get("winhose_libre_parpadeo") or {}).values())
+            or extra.get("extendido_p2_call_pending")
+            or extra.get("p3_intermittent")
+        ):
             out["_autoservicio"] = extra
     except Exception:  # noqa: BLE001
         pass

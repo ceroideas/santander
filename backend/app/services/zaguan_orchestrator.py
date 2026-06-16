@@ -40,6 +40,8 @@ WINHOSE_INPUT_BY_DOOR: dict[PuertaId, str] = {
     "p2": "IN_03_03",
 }
 WINHOSE_WINDOW_SECONDS = 15.0
+# Libre WinHose: parpadeo verde (solo durante ventana 15 s; reposo vuelve a fijo).
+WINHOSE_LIBRE_PARPADEO_MS = 1000
 # Tras cambio de modo: no disparar WinHose por flancos espurios al re-leer IN_03.
 WINHOSE_EDGE_GRACE_S = 3.0
 # Presencia zaguán (placa 2 IN10 + placa 3 IN10): único criterio para bloquear entradas P1/P2.
@@ -227,6 +229,9 @@ def get_autoservicio_status() -> dict[str, Any]:
         "winhose_window_remaining_s": winhose_by_door["p2"]["remaining_s"],
         "winhose_by_door": winhose_by_door,
         "winhose_inputs": dict(WINHOSE_INPUT_BY_DOOR),
+        "winhose_libre_parpadeo": {
+            ch: _should_libre_parpadeo_winhose(ch) for ch in ("p1", "p2", "p3", "p4")
+        },
         "zaguan_presence_inputs": list(OCCUPANCY_INPUT_CODES),
         "zaguan_occupied": _zaguan_occupied(),
         "extendido_p2_call_pending": _extendido_p2_call_pending,
@@ -314,6 +319,34 @@ def _config_libre_fijo(ch: PulsadorId) -> None:
     _config_led_estado_fijo(ch, "libre", LED_LIBRE_COLOR)
 
 
+def _config_libre_parpadeo(ch: PulsadorId) -> None:
+    """Libre WinHose: verde parpadeo durante ventana 15 s."""
+    client = _import_led_client()
+    client.config_estado(
+        {
+            "canal": int(ch[1]),
+            "estado": "libre",
+            "color": list(LED_LIBRE_COLOR),
+            "animacion": "parpadeo",
+            "velocidad": WINHOSE_LIBRE_PARPADEO_MS,
+        }
+    )
+
+
+def _should_libre_parpadeo_winhose(ch: PulsadorId) -> bool:
+    """Parpadeo solo en libre mientras dura la ventana WinHose."""
+    if _current_mode not in WINHOSE_MODES or not _any_winhose_window_active():
+        return False
+    if _current_mode == "horario_autoservicio":
+        return True
+    if _current_mode == "horario_cerrado":
+        return any(
+            _winhose_window_active_for(door) and EXTERIOR_PULSADOR[door] == ch
+            for door in _winhose_doors_for_mode(_current_mode)
+        )
+    return False
+
+
 def _config_cerrado_exterior_ocupado_fijo(ch: PulsadorId) -> None:
     """Cerrado reposo: rojo fijo en exterior (Excel no usa parpadeo rojo en reposo)."""
     _config_led_estado_fijo(ch, "ocupado", LED_OCUPADO_COLOR)
@@ -324,7 +357,10 @@ def _push_leds_to_device(states: dict[PulsadorId, EstadoLed]) -> None:
     for ch, est in states.items():
         try:
             if est == "libre":
-                _config_libre_fijo(ch)
+                if _should_libre_parpadeo_winhose(ch):
+                    _config_libre_parpadeo(ch)
+                else:
+                    _config_libre_fijo(ch)
             elif (
                 _current_mode == "horario_cerrado"
                 and ch in ("p1", "p2")
@@ -486,25 +522,12 @@ def _mode_reposo() -> None:
         _cerrado_reposo()
 
 
-async def _winhose_intermittent_loop(door: PuertaId, until: float) -> None:
-    """INTERMITENTE Excel (verde) en exterior solo durante ventana WinHose activa."""
-    channel = EXTERIOR_PULSADOR[door]
-    client = _import_led_client()
+async def _winhose_window_timer(door: PuertaId, until: float) -> None:
+    """Mantiene la ventana WinHose hasta expiración (LEDs en parpadeo vía config)."""
     try:
-        while (
-            time.monotonic() < until
-            and _winhose_window_active_for(door)
-            and _current_mode in WINHOSE_MODES
-        ):
-            try:
-                await asyncio.to_thread(client.set_estado_canal, channel, "libre")
-                await asyncio.to_thread(
-                    client.config_flash,
-                    {"color": [0, 200, 0], "n_flashes": 2, "duracion_ms": 350},
-                )
-            except Exception as e:  # noqa: BLE001
-                log.debug("Flash intermitente %s: %s", channel, e)
-            await asyncio.sleep(0.9)
+        delay = until - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
     except asyncio.CancelledError:
         pass
     finally:
@@ -520,24 +543,23 @@ async def _winhose_intermittent_loop(door: PuertaId, until: float) -> None:
         try:
             await asyncio.to_thread(_cerrado_reposo)
         except Exception as e:  # noqa: BLE001
-            log.debug("Reposo cerrado (apagado) tras intermitente: %s", e)
+            log.debug("Reposo cerrado tras ventana WinHose: %s", e)
 
 
 def _apply_winhose_window_leds(door: PuertaId) -> None:
-    """LEDs de fondo durante ventana WinHose (el exterior parpadea en la tarea async)."""
+    """LEDs libre durante ventana WinHose (animación parpadeo en el dispositivo)."""
     if _current_mode == "horario_autoservicio":
         _apply_led_map(
             {"p1": "libre", "p2": "libre", "p3": "libre", "p4": "libre"}
         )
     elif _current_mode == "horario_cerrado":
-        # Reposo apagado; solo el exterior WinHose pasa a libre (el loop hace el parpadeo verde).
         _push_leds_to_device({EXTERIOR_PULSADOR[door]: "libre"})
         _led_states[EXTERIOR_PULSADOR[door]] = "libre"
         _sync_led_memory()
 
 
 def _start_winhose_window(door: PuertaId) -> None:
-    """Flanco ON→OFF en llave WinHose → ventana 15 s + exterior intermitente."""
+    """Flanco ON→OFF en llave WinHose → ventana 15 s con libre en parpadeo."""
     until = time.monotonic() + WINHOSE_WINDOW_SECONDS
     _winhose_window_until[door] = until
     _stop_winhose_intermittent(door)
@@ -553,13 +575,12 @@ def _start_winhose_window(door: PuertaId) -> None:
         },
     )
     log.info(
-        "WinHose %s: ventana %ss — %s intermitente",
+        "WinHose %s: ventana %ss — libre parpadeo",
         door,
         WINHOSE_WINDOW_SECONDS,
-        EXTERIOR_PULSADOR[door],
     )
     _winhose_intermittent_tasks[door] = _schedule_coro(
-        _winhose_intermittent_loop(door, until)
+        _winhose_window_timer(door, until)
     )
 
 
@@ -576,7 +597,7 @@ def trigger_winhose_window(door: PuertaId) -> tuple[bool, str]:
     if not _winhose_window_active_for(door):
         return False, "Ventana WinHose no arrancó"
     if _winhose_intermittent_tasks.get(door) is None:
-        return False, "Intermitente WinHose no programado (reinicia backend)"
+        return False, "Ventana WinHose no programada (reinicia backend)"
     return True, ""
 
 
