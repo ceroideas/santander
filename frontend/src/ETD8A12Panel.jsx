@@ -69,11 +69,21 @@ export const colors = {
 
 const API = "/api/panel";
 const RULES_JSON_STORAGE_KEY = "panel_rules_json_draft";
-const DEFAULT_TEMPLATE_CONFIG = {
+/** Preset 1: Invia (diseño actual — azul corporativo). */
+const DEFAULT_TEMPLATE_CONFIG_1 = {
+  mainLogo: "/assets/invia-logo.png",
+  boardLogo: "/assets/invia-board-logo.png",
+  primaryColor: "#2D309A",
+};
+
+/** Preset 2: Santander (rojo corporativo). */
+const DEFAULT_TEMPLATE_CONFIG_2 = {
   mainLogo: "/assets/logo.png",
   boardLogo: "/assets/santander-logo.png",
   primaryColor: "#E50914",
 };
+
+const DEFAULT_TEMPLATE_CONFIG = DEFAULT_TEMPLATE_CONFIG_1;
 
 /** Enclavamientos interruptor (verde, cierres, apertura remota COCE…), no horarios ni incendio. */
 function isToggleEnclavamiento(ruleKey, rule) {
@@ -334,7 +344,8 @@ function TemplateConfigPanel({
   onUploadMainLogo,
   onUploadBoardLogo,
   onSave,
-  onReset,
+  onReset1,
+  onReset2,
 }) {
   const fieldStyle = {
     width: "100%",
@@ -417,7 +428,7 @@ function TemplateConfigPanel({
                   : draft.mainLogo
               }
               onChange={(e) => onChange({ mainLogo: e.target.value })}
-              placeholder="/assets/logo.png"
+              placeholder="/assets/invia-logo.png"
               style={fieldStyle}
             />
             <ImageFilePicker
@@ -506,9 +517,13 @@ function TemplateConfigPanel({
               <FontAwesomeIcon icon={faFloppyDisk} aria-hidden />
               Guardar template
             </Btn>
-            <Btn onClick={onReset}>
+            <Btn onClick={onReset1}>
               <FontAwesomeIcon icon={faRotateLeft} aria-hidden />
-              Restaurar por defecto
+              Restaurar Invia (por defecto 1)
+            </Btn>
+            <Btn onClick={onReset2}>
+              <FontAwesomeIcon icon={faRotateLeft} aria-hidden />
+              Restaurar Santander (por defecto 2)
             </Btn>
           </div>
         </div>
@@ -2398,19 +2413,36 @@ export default function ETD8A12Panel() {
     }
   }, [addUI, templateDraft]);
 
-  const resetTemplateConfig = useCallback(async () => {
-    try {
-      await apiFetch("/api/config/template", {
-        method: "PUT",
-        body: JSON.stringify(DEFAULT_TEMPLATE_CONFIG)
-      });
-      setTemplateConfig(DEFAULT_TEMPLATE_CONFIG);
-      setTemplateDraft(DEFAULT_TEMPLATE_CONFIG);
-      addUI("INFO", "Template restaurado por defecto");
-    } catch (e) {
-      addUI("Error", "No se pudo restaurar la plantilla: " + e.message);
-    }
-  }, [addUI]);
+  const applyTemplatePreset = useCallback(
+    async (preset, label) => {
+      try {
+        await apiFetch("/api/config/template", {
+          method: "PUT",
+          body: JSON.stringify(preset),
+        });
+        setTemplateConfig(preset);
+        setTemplateDraft(preset);
+        addUI("INFO", `Template restaurado: ${label}`);
+      } catch (e) {
+        addUI("Error", "No se pudo restaurar la plantilla: " + e.message);
+      }
+    },
+    [addUI],
+  );
+
+  const resetTemplateConfig1 = useCallback(
+    () => applyTemplatePreset(DEFAULT_TEMPLATE_CONFIG_1, "Invia (por defecto 1)"),
+    [applyTemplatePreset],
+  );
+
+  const resetTemplateConfig2 = useCallback(
+    () =>
+      applyTemplatePreset(
+        DEFAULT_TEMPLATE_CONFIG_2,
+        "Santander (por defecto 2)",
+      ),
+    [applyTemplatePreset],
+  );
 
   const scrollContainerToBottom = useCallback(
     (containerRef, { smooth = true } = {}) => {
@@ -3207,7 +3239,12 @@ export default function ETD8A12Panel() {
         fontSize: 13,
       }}
     >
-      <GlobalLoader open={showGlobalLoader} message={globalLoaderMessage} />
+      <GlobalLoader
+        open={showGlobalLoader}
+        message={globalLoaderMessage}
+        logoSrc={templateConfig.boardLogo}
+        logoFallback={DEFAULT_TEMPLATE_CONFIG.boardLogo}
+      />
       <TopNavbar
         title="Control de Accesos - ETD8A12"
         tabs={TABS}
@@ -3985,9 +4022,12 @@ export default function ETD8A12Panel() {
                     }}
                   >
                     <img
-                      src="/assets/santander-logo.png"
-                      alt="Santander"
+                      src={templateConfig.boardLogo}
+                      alt="Logo placa"
                       style={{ width: 18, height: 18, objectFit: "contain" }}
+                      onError={(e) => {
+                        e.currentTarget.src = DEFAULT_TEMPLATE_CONFIG.boardLogo;
+                      }}
                     />
                     <strong style={{ fontSize: 15 }}>{m.name}</strong>
                     <span
@@ -4701,7 +4741,8 @@ export default function ETD8A12Panel() {
             onUploadMainLogo={(file) => uploadTemplateLogo(file, "mainLogo")}
             onUploadBoardLogo={(file) => uploadTemplateLogo(file, "boardLogo")}
             onSave={saveTemplateDraft}
-            onReset={resetTemplateConfig}
+            onReset1={resetTemplateConfig1}
+            onReset2={resetTemplateConfig2}
           />
         )}
       </div>

@@ -13,6 +13,9 @@ export function TopNavbar({
     <div
       className="h-15 flex items-center justify-between px-6 text-white"
       style={{
+        position: "sticky",
+        top: 0,
+        zIndex: 100,
         background: `linear-gradient(90deg, ${primaryColor} 0%, ${primaryDarkColor} 100%)`,
       }}
     >
